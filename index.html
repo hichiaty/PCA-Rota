@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>PCA Rota Calendar</title>
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    <style>
+        .calendar-container {
+            display: flex;
+            gap: 5px;
+            padding: 5px;
+            background-color: #f8f9fa;
+            min-height: 100vh;
+            flex-direction: row;
+            max-width: 100%;
+            box-sizing: border-box;
+            overflow-x: hidden;
+            position: relative;
+        }
+
+        .calendar {
+            flex: 1;
+            background: white;
+            padding: 5px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            overflow-x: auto;
+            width: 100%;
+            margin-right: 260px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .calendar-grid {
+            flex: 1;
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 2px;
+            margin-top: 5px;
+            width: 100%;
+        }
+
+        .workers-list {
+            width: 240px;
+            background: white;
+            padding: 10px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            display: flex;
+            flex-direction: column;
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            height: calc(100vh - 20px);
+        }
+
+        .workers-list h2 {
+            margin-bottom: 10px;
+            font-size: 1em;
+        }
+
+        #workers {
+            overflow-y: auto;
+            max-height: calc(100vh - 150px);
+            padding-right: 10px;
+        }
+
+        /* Styling the scrollbar */
+        #workers::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        #workers::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 4px;
+        }
+
+        #workers::-webkit-scrollbar-thumb {
+            background: #c1c1c1;
+            border-radius: 4px;
+        }
+
+        #workers::-webkit-scrollbar-thumb:hover {
+            background: #a8a8a8;
+        }
+
+        .calendar-day {
+            padding: 1px;
+            min-height: 60px;
+            background: #f8f9fa;
+            border-radius: 4px;
+            position: relative;
+            width: 100%;
+            min-width: 0;
+        }
+
+        .calendar-day.header {
+            background: #212529;
+            color: white;
+            padding: 2px;
+            text-align: center;
+            font-weight: bold;
+            min-height: auto;
+            font-size: 0.8em;
+        }
+
+        .calendar-day.today {
+            background: #e9ecef;
+            border: 2px solid #007bff;
+        }
+
+        .calendar-day.other-month {
+            opacity: 0.4;
+        }
+
+        .calendar-day.other-month .day-number {
+            color: #6c757d;
+        }
+
+        .calendar-day .day-number {
+            font-weight: 500;
+            color: #495057;
+            font-size: 0.8em;
+            margin-bottom: 0;
+        }
+
+        .calendar-day.today .day-number {
+            color: #007bff;
+            font-weight: bold;
+        }
+
+        .shift-slot {
+            margin: 1px 0;
+            padding: 1px;
+            border-radius: 4px;
+            background-color: #dc3545;
+            color: white;
+            text-align: center;
+            transition: all 0.2s ease;
+            font-size: 0.8em;
+        }
+
+        .shift-slot:not(.unassigned) {
+            background-color: #007bff;
+        }
+
+        .shift-time {
+            font-weight: bold;
+            display: block;
+            font-size: 0.7em;
+            margin-bottom: 0;
+            opacity: 0.9;
+        }
+
+        .worker-tag {
+            background-color: #007bff;
+            color: white;
+            padding: 6px 8px;
+            margin: 4px 0;
+            border-radius: 6px;
+            cursor: move;
+            transition: all 0.2s ease;
+            display: flex;
+            flex-wrap: wrap;
+            width: 100%;
+            row-gap: 4px;
+        }
+
+        .worker-tag span {
+            white-space: normal;
+            hyphens: none;
+            overflow-wrap: normal;
+            word-break: keep-all;
+            margin-right: 8px;
+            flex: 1;
+            min-width: 60px;
+            max-width: 100%;
+        }
+
+        .worker-tag:hover {
+            transform: translateX(5px);
+        }
+
+        .export-btn {
+            background: none;
+            border: none;
+            color: white;
+            padding: 0;
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            font-size: 0.9em;
+            opacity: 0.8;
+            transition: all 0.2s ease;
+            flex-shrink: 0;
+        }
+
+        .export-btn:hover {
+            opacity: 1;
+            transform: scale(1.1);
+        }
+
+        /* Prevent drag when clicking export button */
+        .export-btn {
+            cursor: pointer;
+            pointer-events: auto;
+        }
+
+        .calendar-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 3px;
+        }
+
+        .month-nav,
+        .today-nav,
+        .export-nav {
+            cursor: pointer;
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 2px 8px;
+            border-radius: 6px;
+            font-size: 0.9em;
+            transition: background-color 0.2s ease;
+        }
+
+        .today-nav,
+        .export-nav {
+            background: #6c757d;
+            margin: 0 5px;
+        }
+
+        .month-nav:hover {
+            background: #0056b3;
+        }
+
+        .today-nav:hover,
+        .export-nav:hover {
+            background: #5a6268;
+        }
+
+        .dragging {
+            opacity: 0.5;
+        }
+
+        .workers-list.dragover {
+            background-color: #f8f9fa;
+        }
+
+        /* Modal styles */
+        .worker-options {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .form-check.worker-option {
+            padding: 10px;
+            border-radius: 4px;
+            transition: all 0.2s ease;
+            margin: 0;
+            cursor: pointer;
+        }
+
+        .form-check.worker-option:hover {
+            background-color: #e9ecef;
+        }
+
+        .form-check.worker-option label {
+            margin: 0;
+            padding: 5px;
+            display: block;
+            cursor: pointer;
+        }
+
+        .form-check-input[type="radio"] {
+            display: none;
+        }
+
+        .form-check-input[type="radio"]:checked+label,
+        .form-check.worker-option:has(.form-check-input:checked) {
+            background-color: #007bff;
+            color: white;
+            border-radius: 4px;
+        }
+
+        .form-check.worker-option:has(.form-check-input:checked):hover {
+            background-color: #0056b3;
+        }
+
+        .shift-details {
+            font-weight: 500;
+            color: #495057;
+        }
+
+        .shift-count {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background-color: rgba(0, 0, 0, 0.2);
+            border-radius: 12px;
+            padding: 0 6px;
+            height: 20px;
+            min-width: 20px;
+            font-size: 0.8em;
+            flex-shrink: 0;
+        }
+
+        /* Add these styles */
+        .show-only-btn {
+            background: none;
+            border: none;
+            color: white;
+            padding: 0;
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            font-size: 0.9em;
+            opacity: 0.8;
+            transition: all 0.2s ease;
+            flex-shrink: 0;
+        }
+
+        .show-only-btn:hover {
+            opacity: 1;
+            transform: scale(1.1);
+        }
+
+        .show-only-btn.active {
+            opacity: 1;
+            text-shadow: 0 0 5px rgba(255, 255, 255, 0.5);
+        }
+
+        .worker-buttons {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            margin-left: auto;
+            flex-shrink: 0;
+        }
+
+        .remove-worker-btn {
+            background: none;
+            border: none;
+            color: white;
+            padding: 0;
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            font-size: 0.9em;
+            opacity: 0.6;
+            transition: all 0.2s ease;
+            flex-shrink: 0;
+        }
+
+        .remove-worker-btn:hover {
+            opacity: 1;
+            color: #ffcccc;
+            transform: scale(1.1);
+        }
+    </style>
+</head>
+
+<body>
+    <div class="calendar-container">
+        <div class="calendar">
+            <div id="calendar-grid" class="calendar-grid">
+                <!-- Calendar will be generated here -->
+            </div>
+        </div>
+        <div class="workers-list">
+            <h2 class="h4">Staff</h2>
+            <div id="workers" class="d-flex flex-column gap-2">
+                <!-- Workers will be loaded from localStorage -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Modal -->
+    <div class="modal fade" id="shiftModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Assign Shift</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="shift-details mb-3"></p>
+                    <div class="worker-options">
+                        <!-- Worker options will be generated here -->
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-danger unassign-btn">Unassign</button>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="rota.js"></script>
+    <script src="setup_wizard.js"></script>
+</body>
+
+</html>
