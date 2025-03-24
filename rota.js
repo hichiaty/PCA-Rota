@@ -560,8 +560,9 @@ class ShiftCalendar {
                 // Process each shift pattern for this day
                 this.shiftPatterns.forEach(shift => {
                     const assignment = this.getAssignment(date, shift.id);
-                    // Format the shift time nicely
-                    content += `- **${shift.name}** (${shift.startTime} - ${shift.endTime}): ${assignment}\n`;
+                    // Format the shift time nicely and add exclamation emoji for unassigned shifts
+                    const displayAssignment = assignment === 'unassigned' ? '❗unassigned ❗' : assignment;
+                    content += `- **${shift.name}** (${shift.startTime} - ${shift.endTime}): ${displayAssignment}\n`;
                 });
 
                 // Add an empty line between days
