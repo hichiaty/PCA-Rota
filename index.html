@@ -370,6 +370,124 @@
             color: #ffcccc;
             transform: scale(1.1);
         }
+
+        .settings-btn {
+            background: none;
+            border: none;
+            color: white;
+            padding: 0;
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            font-size: 0.9em;
+            opacity: 0.8;
+            transition: all 0.2s ease;
+            flex-shrink: 0;
+        }
+
+        .settings-btn:hover {
+            opacity: 1;
+            transform: scale(1.1);
+        }
+
+        .holiday-item {
+            background: #f8f9fa;
+            padding: 8px;
+            border-radius: 4px;
+        }
+
+        .holiday-list {
+            max-height: 350px;
+            overflow-y: auto;
+        }
+
+        .holiday-badge {
+            position: relative;
+            display: inline-block;
+        }
+
+        .holiday-badge .badge {
+            padding: 0.5rem 0.75rem;
+            font-weight: normal;
+            border: 1px solid #dee2e6;
+        }
+
+        .btn-close.holiday-remove {
+            font-size: 0.6rem;
+            margin-left: 0.5rem;
+            opacity: 0.5;
+        }
+
+        .btn-close.holiday-remove:hover {
+            opacity: 1;
+        }
+
+        .toast-container {
+            z-index: 1060;
+        }
+
+        /* Make date inputs more mobile-friendly */
+        input[type="date"] {
+            -webkit-appearance: none;
+        }
+
+        .shift-preferences {
+            padding: 10px;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        /* New styles for preference table */
+        .preference-table th,
+        .preference-table td {
+            text-align: center;
+            vertical-align: middle;
+        }
+
+        .preference-table th {
+            background-color: #f8f9fa;
+            font-weight: 500;
+        }
+
+        .preference-table .form-check-input {
+            width: 1.5em;
+            height: 1.5em;
+            margin: 0;
+            cursor: pointer;
+        }
+
+        .preference-table .form-check-input:checked {
+            background-color: #28a745;
+            border-color: #28a745;
+        }
+
+        /* Enhanced tab styling */
+        #settingsTabs .nav-link {
+            color: #495057;
+            border-radius: 0;
+            padding: 0.75rem 1.5rem;
+            font-weight: 500;
+        }
+
+        #settingsTabs .nav-link.active {
+            color: #007bff;
+            border-bottom: 2px solid #007bff;
+            background-color: transparent;
+        }
+
+        .tab-content {
+            padding: 1.5rem 0.5rem;
+        }
+
+        /* Hover effect for preference cells */
+        .preference-table td:not(:first-child):hover {
+            background-color: rgba(0, 123, 255, 0.1);
+        }
     </style>
 </head>
 

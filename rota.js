@@ -20,6 +20,76 @@ class ShiftCalendar {
         this.loadWorkers(); // Load workers from localStorage
         this.updateWorkerCounts();
         this.setupStaffManagement(); // Setup staff management UI
+        this.setupHolidayButtonListeners(); // Setup holiday removal button listeners
+
+        // Update CSS for holiday warnings and add preference highlights
+        const style = document.createElement('style');
+        style.textContent = `
+            .shift-slot.holiday-warning {
+                background-color: rgba(255, 105, 97, 0.2) !important;
+                border: 2px solid #ff6961 !important;
+                position: relative;
+                box-shadow: 0 0 8px rgba(255, 105, 97, 0.4);
+                transition: all 0.3s ease;
+            }
+            
+            .shift-slot.holiday-warning::before {
+                content: "⚠️";
+                position: absolute;
+                top: 2px;
+                right: 2px;
+                font-size: 10px;
+                opacity: 0.9;
+                z-index: 10;
+            }
+            
+            .shift-slot.holiday-warning::after {
+                content: "";
+                position: absolute;
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                background: repeating-linear-gradient(
+                    45deg,
+                    rgba(255, 105, 97, 0.1),
+                    rgba(255, 105, 97, 0.1) 10px,
+                    rgba(255, 105, 97, 0.2) 10px,
+                    rgba(255, 105, 97, 0.2) 20px
+                );
+                border-radius: 3px;
+                pointer-events: none;
+            }
+            
+            /* Make the day cell subtly highlight as well */
+            .calendar-day:has(.shift-slot.holiday-warning) {
+                background-color: rgba(255, 240, 240, 0.5);
+            }
+
+            /* New style for preferred shifts */
+            .shift-slot.preference-highlight {
+                background-color: rgba(144, 238, 144, 0.25) !important;
+                border: 2px dashed #4caf50 !important;
+                position: relative;
+                transition: all 0.3s ease;
+            }
+            
+            .shift-slot.preference-highlight::before {
+                content: "👍";
+                position: absolute;
+                top: 2px;
+                right: 2px;
+                font-size: 10px;
+                opacity: 0.9;
+                z-index: 10;
+            }
+        `;
+        document.head.appendChild(style);
+
+        // Ensure holiday highlighting is properly initialized after everything else
+        setTimeout(() => {
+            this.initializeHolidayHighlighting();
+        }, 500);
     }
 
     setupMonthNavigation() {
@@ -139,6 +209,9 @@ class ShiftCalendar {
             dayCell.innerHTML = this.createDayCellContent(day, false);
             this.calendarGrid.appendChild(dayCell);
         }
+
+        // Ensure shift slots have properly formatted dates to fix highlighting issues
+        this.normalizeShiftSlotDates();
     }
 
     createDayCellContent(day, isCurrentMonth = true) {
@@ -175,19 +248,26 @@ class ShiftCalendar {
 
     setupDragAndDrop() {
         const workerTags = document.querySelectorAll('.worker-tag');
-        const shiftSlots = document.querySelectorAll('.shift-slot');
         const workersList = document.querySelector('.workers-list');
 
+        // Handle drag events on worker tags
         workerTags.forEach(worker => {
             worker.addEventListener('dragstart', (e) => {
                 worker.classList.add('dragging');
                 const workerName = worker.querySelector('span').textContent;
                 e.dataTransfer.setData('text/plain', workerName);
                 e.dataTransfer.effectAllowed = 'move';
+
+                // Use the renamed method
+                setTimeout(() => {
+                    this.highlightWorkerAvailability(workerName, true);
+                }, 0);
             });
 
             worker.addEventListener('dragend', () => {
                 worker.classList.remove('dragging');
+                // Use the renamed method
+                this.highlightWorkerAvailability(null, false);
             });
         });
 
@@ -213,23 +293,39 @@ class ShiftCalendar {
             }
         });
 
+        // Use event delegation for all shift slots to improve performance and ensure it works with dynamically added elements
+        this.calendarGrid.addEventListener('dragstart', (e) => {
+            const slot = e.target.closest('.shift-slot');
+            if (!slot) return;
+
+            if (!slot.classList.contains('unassigned')) {
+                const workerName = slot.textContent.replace(slot.querySelector('.shift-time').textContent, '').trim();
+                e.dataTransfer.setData('text/plain', workerName);
+                e.dataTransfer.effectAllowed = 'move';
+                slot.classList.add('dragging');
+
+                // Use the renamed method
+                setTimeout(() => {
+                    this.highlightWorkerAvailability(workerName, true);
+                }, 0);
+            } else {
+                e.preventDefault();
+            }
+        });
+
+        this.calendarGrid.addEventListener('dragend', (e) => {
+            const slot = e.target.closest('.shift-slot');
+            if (!slot) return;
+
+            slot.classList.remove('dragging');
+            // Use the renamed method
+            this.highlightWorkerAvailability(null, false);
+        });
+
+        // Set up individual shift slots for drag operations
+        const shiftSlots = document.querySelectorAll('.shift-slot');
         shiftSlots.forEach(slot => {
             slot.setAttribute('draggable', true);
-
-            slot.addEventListener('dragstart', (e) => {
-                if (!slot.classList.contains('unassigned')) {
-                    const workerName = slot.textContent.replace(slot.querySelector('.shift-time').textContent, '').trim();
-                    e.dataTransfer.setData('text/plain', workerName);
-                    e.dataTransfer.effectAllowed = 'move';
-                    slot.classList.add('dragging');
-                } else {
-                    e.preventDefault();
-                }
-            });
-
-            slot.addEventListener('dragend', () => {
-                slot.classList.remove('dragging');
-            });
 
             slot.addEventListener('dragover', (e) => {
                 e.preventDefault();
@@ -288,6 +384,18 @@ class ShiftCalendar {
             <div class="mb-3">
                 <input type="text" class="form-control" placeholder="Search staff..." id="workerSearch">
             </div>
+            <div class="mb-3">
+                <div class="d-flex gap-2 flex-wrap">
+                    <div class="badge bg-light border text-dark p-2 d-flex align-items-center">
+                        <span class="preference-indicator">👍</span>
+                        <span class="ms-1">Preferred shift</span>
+                    </div>
+                    <div class="badge bg-light border text-dark p-2 d-flex align-items-center">
+                        <span class="holiday-indicator">⚠️</span>
+                        <span class="ms-1">On holiday</span>
+                    </div>
+                </div>
+            </div>
         `);
 
         const searchInput = modalElement.querySelector('#workerSearch');
@@ -341,12 +449,21 @@ class ShiftCalendar {
 
             // Show/hide unassign button
             unassignBtn.style.display = currentWorker === 'unassigned' ? 'none' : 'block';
+
+            // Update worker options with preference and holiday indicators
+            this.updateWorkerOptionsWithAvailability(date, shift);
         });
 
         // Handle worker selection by clicking anywhere in the row
         workerOptions.addEventListener('click', (e) => {
             const workerOption = e.target.closest('.worker-option');
             if (workerOption) {
+                // Don't select if the worker is on holiday
+                if (workerOption.classList.contains('worker-on-holiday')) {
+                    this.showToast(`Cannot assign staff member on holiday`, 'warning');
+                    return;
+                }
+
                 const radio = workerOption.querySelector('input');
                 const worker = radio.value;
                 const date = new Date(currentSlot.dataset.date);
@@ -371,6 +488,16 @@ class ShiftCalendar {
     }
 
     assignWorker(slot, worker, date, shift) {
+        // Check if the worker is on holiday for this date
+        const dateStr = date.toISOString().split('T')[0];
+        const workerSettings = this.getStaffSettings(worker);
+
+        if (workerSettings.holidays && workerSettings.holidays.includes(dateStr)) {
+            // Show an error message
+            this.showToast(`Cannot assign ${worker} on ${date.toDateString()} - they are on holiday`, 'warning');
+            return false;
+        }
+
         // Check if trying to assign to Night1 or Night2
         if (shift === '2' || shift === '3') {
             // Get the other night shift assignment
@@ -751,6 +878,9 @@ class ShiftCalendar {
                         onclick="event.stopPropagation(); calendar.filterShifts(this.classList.contains('active') ? null : '${workerName}')" 
                         data-worker="${workerName}" 
                         title="Show only this worker's shifts">👁️</button>
+                <button class="settings-btn" 
+                        onclick="event.stopPropagation(); calendar.openStaffSettings('${workerName}')" 
+                        title="Staff settings">⚙️</button>
                 <button class="export-btn" 
                         onclick="event.stopPropagation(); calendar.downloadICS('${workerName}')" 
                         title="Export calendar">📅</button>
@@ -762,21 +892,22 @@ class ShiftCalendar {
 
         workersContainer.appendChild(workerTag);
 
-        // Re-setup drag and drop for the new worker
-        this.setupWorkerDragEvents(workerTag);
-    }
-
-    // Add method to setup drag events for a worker tag
-    setupWorkerDragEvents(workerTag) {
+        // Add proper drag event handling for the new worker
         workerTag.addEventListener('dragstart', (e) => {
             workerTag.classList.add('dragging');
-            const workerName = workerTag.querySelector('span').textContent;
             e.dataTransfer.setData('text/plain', workerName);
             e.dataTransfer.effectAllowed = 'move';
+
+            // Use the renamed method
+            requestAnimationFrame(() => {
+                this.highlightWorkerAvailability(workerName, true);
+            });
         });
 
         workerTag.addEventListener('dragend', () => {
             workerTag.classList.remove('dragging');
+            // Use the renamed method
+            this.highlightWorkerAvailability(null, false);
         });
     }
 
@@ -816,9 +947,9 @@ class ShiftCalendar {
         document.getElementById('loadDataBtn').addEventListener('click', () => this.loadDataFromFile());
     }
 
-    // Method to remove a staff member
+    // Updated method to remove a staff member and their settings
     removeWorker(workerName) {
-        if (confirm(`Are you sure you want to remove ${workerName}? This will also remove all their shifts from the calendar.`)) {
+        if (confirm(`Are you sure you want to remove ${workerName}? This will also remove all their shifts from the calendar and their settings.`)) {
             // Get current staff list
             let workers = JSON.parse(localStorage.getItem('staffMembers')) || [];
 
@@ -843,6 +974,12 @@ class ShiftCalendar {
 
             // Reassign any shifts assigned to this worker
             this.reassignWorkerShifts(workerName);
+
+            // Also remove the staff settings from localStorage
+            localStorage.removeItem(`staffSettings_${workerName}`);
+
+            // Show a confirmation toast
+            this.showToast(`${workerName} has been removed`);
         }
     }
 
@@ -851,7 +988,17 @@ class ShiftCalendar {
         const workers = JSON.parse(localStorage.getItem('staffMembers')) || [];
         const workerOptions = document.querySelector('.worker-options');
 
-        workerOptions.innerHTML = workers.map(worker => `
+        // Include summary information at the top of the modal
+        let summaryHtml = `
+            <div class="staff-summary mb-3">
+                <div class="alert alert-info">
+                    <h6 class="mb-1">Staff Assignment Helper</h6>
+                    <p class="mb-0 small">Staff are sorted with preferred shifts at the top. Staff on holiday cannot be assigned.</p>
+                </div>
+            </div>
+        `;
+
+        workerOptions.innerHTML = summaryHtml + workers.map(worker => `
             <div class="form-check worker-option">
                 <label class="form-check-label w-100">
                     <input class="form-check-input worker-radio" type="radio" name="worker" value="${worker}">
@@ -884,14 +1031,27 @@ class ShiftCalendar {
         }
     }
 
-    // Update the saveAllData method to include userName and setupComplete flag
+    // Update the saveAllData method to include staff settings
     saveAllData() {
+        // Get all staff settings from localStorage
+        const staffSettings = {};
+        const staffMembers = JSON.parse(localStorage.getItem('staffMembers')) || [];
+
+        // Collect settings for each staff member
+        staffMembers.forEach(worker => {
+            const settings = localStorage.getItem(`staffSettings_${worker}`);
+            if (settings) {
+                staffSettings[worker] = JSON.parse(settings);
+            }
+        });
+
         const currentData = {
             assignments: this.getStoredAssignments(),
-            staff: JSON.parse(localStorage.getItem('staffMembers')) || [],
+            staff: staffMembers,
             shiftPatterns: this.shiftPatterns,
             userName: localStorage.getItem('userName') || '',
             setupComplete: localStorage.getItem('setupComplete') === 'true',
+            staffSettings: staffSettings, // Add staff settings to the export data
             timestamp: new Date().toISOString()
         };
 
@@ -919,7 +1079,7 @@ class ShiftCalendar {
         return `${year}-${month}-${day}`;
     }
 
-    // Update the loadDataFromFile method to handle userName and setupComplete flag
+    // Update the loadDataFromFile method to handle staff settings
     loadDataFromFile() {
         // Create a file input element
         const fileInput = document.createElement('input');
@@ -945,12 +1105,16 @@ class ShiftCalendar {
                         throw new Error('Invalid backup file format');
                     }
 
+                    // Check if staff settings are included in the backup
+                    const hasStaffSettings = data.staffSettings && typeof data.staffSettings === 'object';
+
                     // Show a more detailed confirmation message
                     const message = `This will replace your current configuration with:
                     ${data.userName ? `• User name: ${data.userName}` : ''}
                     • ${data.staff.length} staff member(s)
                     • ${data.shiftPatterns ? data.shiftPatterns.length : 0} shift pattern(s)
                     • All shift assignments
+                    ${hasStaffSettings ? `• Staff settings (preferences & holidays)` : ''}
                     
                     Continue?`;
 
@@ -976,6 +1140,13 @@ class ShiftCalendar {
                         // Set the setupComplete flag if it exists in the backup
                         if (typeof data.setupComplete === 'boolean') {
                             localStorage.setItem('setupComplete', data.setupComplete.toString());
+                        }
+
+                        // Save staff settings if they exist in the backup
+                        if (hasStaffSettings) {
+                            Object.keys(data.staffSettings).forEach(worker => {
+                                localStorage.setItem(`staffSettings_${worker}`, JSON.stringify(data.staffSettings[worker]));
+                            });
                         }
 
                         // Reload the UI
@@ -1010,6 +1181,756 @@ class ShiftCalendar {
         });
 
         fileInput.click();
+    }
+
+    // Replace the openStaffSettings method to remove the auto-save status message
+    openStaffSettings(workerName) {
+        // Get existing settings or create default ones
+        const staffSettings = this.getStaffSettings(workerName);
+
+        // Create and show the modal
+        const modalHTML = `
+            <div class="modal fade" id="staffSettingsModal" tabindex="-1" aria-hidden="true">
+                <div class="modal-dialog modal-lg">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title">Settings for ${workerName}</h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                        </div>
+                        <div class="modal-body">
+                            <ul class="nav nav-tabs mb-3" id="settingsTabs" role="tablist">
+                                <li class="nav-item" role="presentation">
+                                    <button class="nav-link active" id="preferences-tab" data-bs-toggle="tab" 
+                                        data-bs-target="#preferences" type="button" role="tab" 
+                                        aria-controls="preferences" aria-selected="true">Shift Preferences</button>
+                                </li>
+                                <li class="nav-item" role="presentation">
+                                    <button class="nav-link" id="holidays-tab" data-bs-toggle="tab" 
+                                        data-bs-target="#holidays" type="button" role="tab" 
+                                        aria-controls="holidays" aria-selected="false">Holidays</button>
+                                </li>
+                            </ul>
+                            
+                            <div class="tab-content">
+                                <div class="tab-pane fade show active" id="preferences" role="tabpanel" 
+                                     aria-labelledby="preferences-tab">
+                                    <div class="shift-preferences">
+                                        <p class="text-muted mb-3">
+                                            Select which shifts ${workerName} prefers to work on specific days.
+                                        </p>
+                                        <div class="table-responsive">
+                                            <table class="table table-bordered preference-table">
+                                                <thead class="table-light">
+                                                    <tr>
+                                                        <th>Shift</th>
+                                                        <th>Mon</th>
+                                                        <th>Tue</th>
+                                                        <th>Wed</th>
+                                                        <th>Thu</th>
+                                                        <th>Fri</th>
+                                                        <th>Sat</th>
+                                                        <th>Sun</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    ${this.shiftPatterns.map(shift => this.createShiftPreferenceRow(shift, staffSettings)).join('')}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="tab-pane fade" id="holidays" role="tabpanel" aria-labelledby="holidays-tab">
+                                    <div class="holidays-section">
+                                        <p class="text-muted mb-3">
+                                            Add dates when ${workerName} is not available to work.
+                                        </p>
+                                        
+                                        <div class="card mb-4">
+                                            <div class="card-header bg-light">
+                                                <h6 class="mb-0">Add Holiday</h6>
+                                            </div>
+                                            <div class="card-body">
+                                                <div class="row g-3">
+                                                    <div class="col-md-12 mb-2">
+                                                        <div class="d-flex flex-wrap gap-2">
+                                                            <button class="btn btn-outline-secondary btn-sm" onclick="calendar.addQuickHoliday('${workerName}', 'today')">
+                                                                Today
+                                                            </button>
+                                                            <button class="btn btn-outline-secondary btn-sm" onclick="calendar.addQuickHoliday('${workerName}', 'tomorrow')">
+                                                                Tomorrow
+                                                            </button>
+                                                            <button class="btn btn-outline-secondary btn-sm" onclick="calendar.addQuickHoliday('${workerName}', 'weekend')">
+                                                                This Weekend
+                                                            </button>
+                                                            <button class="btn btn-outline-secondary btn-sm" onclick="calendar.addQuickHoliday('${workerName}', 'nextWeek')">
+                                                                Next Week
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                    
+                                                    <div class="col-md-6">
+                                                        <label for="holidayStart" class="form-label">Start Date</label>
+                                                        <input type="date" class="form-control" id="holidayStart" onchange="calendar.updateEndDate(this.value)">
+                                                    </div>
+                                                    <div class="col-md-6">
+                                                        <label for="holidayEnd" class="form-label">End Date <span class="text-muted">(Optional)</span></label>
+                                                        <input type="date" class="form-control" id="holidayEnd">
+                                                    </div>
+                                                    <div class="col-12 text-end">
+                                                        <button class="btn btn-primary" onclick="calendar.addHolidayRange('${workerName}')">
+                                                            Add to Calendar
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        
+                                        <div class="card">
+                                            <div class="card-header bg-light d-flex justify-content-between align-items-center">
+                                                <h6 class="mb-0">Scheduled Holidays</h6>
+                                                <span class="badge bg-primary holiday-count">${staffSettings.holidays ? staffSettings.holidays.length : 0}</span>
+                                            </div>
+                                            <div class="card-body p-0">
+                                                <div class="holiday-list">
+                                                    ${this.generateHolidaysList(staffSettings.holidays)}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        // Remove existing modal if present
+        const existingModal = document.getElementById('staffSettingsModal');
+        if (existingModal) {
+            existingModal.remove();
+        }
+
+        // Add modal to document
+        document.body.insertAdjacentHTML('beforeend', modalHTML);
+
+        // Add event listeners for auto-saving preferences
+        setTimeout(() => {
+            const preferenceCheckboxes = document.querySelectorAll('.preference-checkbox');
+            preferenceCheckboxes.forEach(checkbox => {
+                checkbox.addEventListener('change', () => {
+                    this.autoSaveStaffPreferences(workerName);
+                });
+            });
+        }, 100);
+
+        // Initialize and show modal
+        const modal = new bootstrap.Modal(document.getElementById('staffSettingsModal'));
+        modal.show();
+    }
+
+    createShiftPreferenceRow(shift, staffSettings) {
+        const days = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+
+        // Check if the day-specific preferences exist, initialize if not
+        if (!staffSettings.dayPreferences) {
+            staffSettings.dayPreferences = {};
+        }
+
+        return `
+            <tr>
+                <td class="align-middle">
+                    <strong>${shift.name}</strong><br>
+                    <small class="text-muted">${shift.startTime} - ${shift.endTime}</small>
+                </td>
+                ${days.map(day => {
+            const prefKey = `${shift.id}_${day}`;
+            const isPreferred = staffSettings.dayPreferences[prefKey] === true;
+
+            return `
+                        <td class="text-center align-middle">
+                            <div class="form-check d-flex justify-content-center">
+                                <input class="form-check-input preference-checkbox" type="checkbox" 
+                                    id="${prefKey}" 
+                                    data-shift="${shift.id}" 
+                                    data-day="${day}" 
+                                    ${isPreferred ? 'checked' : ''}>
+                            </div>
+                        </td>
+                    `;
+        }).join('')}
+            </tr>
+        `;
+    }
+
+    getStaffSettings(workerName) {
+        const settings = localStorage.getItem(`staffSettings_${workerName}`);
+        return settings ? JSON.parse(settings) : {
+            dayPreferences: {},
+            holidays: []
+        };
+    }
+
+    generateHolidaysList(holidays) {
+        if (!holidays || holidays.length === 0) {
+            return `<div class="text-center py-4">
+                        <div class="text-muted">
+                            <i class="bi bi-calendar-check" style="font-size: 2rem;"></i>
+                            <p class="mt-2">No holidays scheduled</p>
+                        </div>
+                    </div>`;
+        }
+
+        // Group holidays by month
+        const groupedHolidays = {};
+        holidays.sort((a, b) => new Date(a) - new Date(b)).forEach(date => {
+            const d = new Date(date);
+            const monthYear = `${d.getFullYear()}-${d.getMonth()}`;
+            if (!groupedHolidays[monthYear]) {
+                groupedHolidays[monthYear] = [];
+            }
+            groupedHolidays[monthYear].push(date);
+        });
+
+        let html = '<div class="list-group list-group-flush">';
+
+        // For each month, create a section
+        Object.keys(groupedHolidays).sort().forEach(monthYear => {
+            const dates = groupedHolidays[monthYear];
+            const [year, month] = monthYear.split('-');
+            const monthName = new Date(parseInt(year), parseInt(month), 1).toLocaleString('default', { month: 'long' });
+
+            html += `
+                <div class="list-group-item px-0">
+                    <h6 class="mb-2 text-muted">${monthName} ${year}</h6>
+                    <div class="d-flex flex-wrap gap-2">
+                        ${dates.map(date => {
+                const d = new Date(date);
+                const formattedDate = d.toLocaleDateString(undefined, {
+                    weekday: 'short',
+                    day: 'numeric'
+                });
+                // Use data attribute instead of onclick with string parameter
+                return `
+                                <div class="holiday-badge">
+                                    <span class="badge bg-light text-dark">
+                                        ${formattedDate}
+                                        <button type="button" class="btn-close holiday-remove" 
+                                                data-date="${date}" 
+                                                aria-label="Remove"></button>
+                                    </span>
+                                </div>`;
+            }).join('')}
+                    </div>
+                </div>
+            `;
+        });
+
+        html += '</div>';
+        return html;
+    }
+
+    updateHolidayCount(count) {
+        const countBadge = document.querySelector('.holiday-count');
+        if (countBadge) {
+            countBadge.textContent = count;
+        }
+    }
+
+    addQuickHoliday(workerName, type) {
+        const settings = this.getStaffSettings(workerName);
+
+        // Get today's date
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        // Format as ISO date string
+        const formatDate = (date) => {
+            return date.toISOString().split('T')[0];
+        };
+
+        let dates = [];
+
+        switch (type) {
+            case 'today':
+                dates.push(formatDate(today));
+                break;
+            case 'tomorrow':
+                const tomorrow = new Date(today);
+                tomorrow.setDate(tomorrow.getDate() + 1);
+                dates.push(formatDate(tomorrow));
+                break;
+            case 'weekend':
+                // Find coming weekend days (Saturday and Sunday)
+                const saturdayOffset = (6 - today.getDay()) % 7; // Days until Saturday
+                const saturday = new Date(today);
+                saturday.setDate(saturday.getDate() + saturdayOffset);
+
+                const sunday = new Date(saturday);
+                sunday.setDate(sunday.getDate() + 1);
+
+                dates.push(formatDate(saturday));
+                dates.push(formatDate(sunday));
+                break;
+            case 'nextWeek':
+                // Add all days of next week (Monday to Sunday)
+                const nextMonday = new Date(today);
+                nextMonday.setDate(nextMonday.getDate() + (1 + 7 - today.getDay()) % 7);
+
+                for (let i = 0; i < 7; i++) {
+                    const day = new Date(nextMonday);
+                    day.setDate(day.getDate() + i);
+                    dates.push(formatDate(day));
+                }
+                break;
+        }
+
+        // Add all dates that aren't already in the settings
+        let added = 0;
+        dates.forEach(date => {
+            if (!settings.holidays.includes(date)) {
+                settings.holidays.push(date);
+                added++;
+            }
+        });
+
+        if (added > 0) {
+            localStorage.setItem(`staffSettings_${workerName}`, JSON.stringify(settings));
+
+            // Update the UI
+            const holidayList = document.querySelector('.holiday-list');
+            holidayList.innerHTML = this.generateHolidaysList(settings.holidays);
+
+            // Update the holiday count
+            this.updateHolidayCount(settings.holidays.length);
+
+            // Show success message
+            const msg = added === 1 ? '1 day' : `${added} days`;
+            this.showToast(`Added ${msg} to holidays`);
+        } else {
+            this.showToast('These dates are already in holidays', 'warning');
+        }
+    }
+
+    addHolidayRange(workerName) {
+        const startInput = document.getElementById('holidayStart');
+        const endInput = document.getElementById('holidayEnd');
+
+        const startDate = startInput.value;
+        const endDate = endInput.value;
+
+        if (!startDate) {
+            this.showToast('Please select a start date', 'warning');
+            return;
+        }
+
+        const settings = this.getStaffSettings(workerName);
+        let dates = [];
+
+        if (!endDate || startDate === endDate) {
+            // Single day
+            dates.push(startDate);
+        } else {
+            // Date range
+            const start = new Date(startDate);
+            const end = new Date(endDate);
+
+            if (start > end) {
+                this.showToast('End date must be after start date', 'warning');
+                return;
+            }
+
+            // Generate all dates in the range
+            const current = new Date(start);
+            while (current <= end) {
+                dates.push(current.toISOString().split('T')[0]);
+                current.setDate(current.getDate() + 1);
+            }
+        }
+
+        // Add dates that aren't already in holidays
+        let added = 0;
+        dates.forEach(date => {
+            if (!settings.holidays.includes(date)) {
+                settings.holidays.push(date);
+                added++;
+            }
+        });
+
+        if (added > 0) {
+            localStorage.setItem(`staffSettings_${workerName}`, JSON.stringify(settings));
+
+            // Update the UI
+            const holidayList = document.querySelector('.holiday-list');
+            holidayList.innerHTML = this.generateHolidaysList(settings.holidays);
+
+            // Update the holiday count
+            this.updateHolidayCount(settings.holidays.length);
+
+            // Clear the inputs
+            startInput.value = '';
+            endInput.value = '';
+
+            // Show success message
+            const msg = added === 1 ? '1 day' : `${added} days`;
+            this.showToast(`Added ${msg} to holidays`);
+        } else {
+            this.showToast('These dates are already in holidays', 'warning');
+        }
+    }
+
+    showToast(message, type = 'success') {
+        // Create toast container if it doesn't exist
+        let toastContainer = document.querySelector('.toast-container');
+        if (!toastContainer) {
+            toastContainer = document.createElement('div');
+            toastContainer.className = 'toast-container position-fixed bottom-0 end-0 p-3';
+            document.body.appendChild(toastContainer);
+        }
+
+        // Create unique ID for this toast
+        const toastId = 'toast-' + Date.now();
+
+        // Create toast HTML
+        const toastHtml = `
+            <div id="${toastId}" class="toast" role="alert" aria-live="assertive" aria-atomic="true">
+                <div class="toast-header ${type === 'success' ? 'bg-success text-white' : 'bg-warning text-dark'}">
+                    <strong class="me-auto">${type === 'success' ? 'Success' : 'Warning'}</strong>
+                    <button type="button" class="btn-close ${type === 'success' ? 'btn-close-white' : ''}" data-bs-dismiss="toast" aria-label="Close"></button>
+                </div>
+                <div class="toast-body">
+                    ${message}
+                </div>
+            </div>
+        `;
+
+        // Add toast to container
+        toastContainer.insertAdjacentHTML('beforeend', toastHtml);
+
+        // Initialize and show the toast
+        const toastElement = document.getElementById(toastId);
+        const toast = new bootstrap.Toast(toastElement, { delay: 3000 });
+        toast.show();
+
+        // Remove toast after it's hidden
+        toastElement.addEventListener('hidden.bs.toast', () => {
+            toastElement.remove();
+        });
+    }
+
+    // Update the autoSaveStaffPreferences method to remove the status message display
+    autoSaveStaffPreferences(workerName) {
+        const settings = this.getStaffSettings(workerName);
+
+        // Save preferred shifts by day
+        settings.dayPreferences = {};
+
+        // Get all preference checkboxes
+        const preferenceCheckboxes = document.querySelectorAll('.preference-checkbox');
+        preferenceCheckboxes.forEach(checkbox => {
+            const shiftId = checkbox.dataset.shift;
+            const day = checkbox.dataset.day;
+            const prefKey = `${shiftId}_${day}`;
+
+            // Store preference state in settings
+            settings.dayPreferences[prefKey] = checkbox.checked;
+        });
+
+        // Save to localStorage
+        localStorage.setItem(`staffSettings_${workerName}`, JSON.stringify(settings));
+
+        // No status message displayed anymore
+    }
+
+    // Update the removeHoliday method to work with the event instead of direct string
+    removeHoliday(dateOrEvent) {
+        // Check if this is an event or direct date call
+        let date;
+        if (typeof dateOrEvent === 'string') {
+            // Direct call with date string
+            date = dateOrEvent;
+        } else {
+            // Called from click event, get date from data attribute
+            const button = dateOrEvent.target || dateOrEvent.srcElement;
+            date = button.getAttribute('data-date');
+        }
+
+        const modal = document.getElementById('staffSettingsModal');
+        const workerName = modal.querySelector('.modal-title').textContent.replace('Settings for ', '');
+
+        const settings = this.getStaffSettings(workerName);
+
+        // Only proceed if we have a valid date
+        if (date) {
+            // Filter out the removed date
+            settings.holidays = settings.holidays.filter(h => h !== date);
+            localStorage.setItem(`staffSettings_${workerName}`, JSON.stringify(settings));
+
+            // Update the holiday list
+            const holidayList = document.querySelector('.holiday-list');
+            holidayList.innerHTML = this.generateHolidaysList(settings.holidays);
+
+            // Update the holiday count
+            this.updateHolidayCount(settings.holidays.length);
+
+            // Show a toast notification
+            this.showToast('Holiday removed');
+        }
+    }
+
+    // Add this method to the class to setup event listeners for holiday removal buttons
+    setupHolidayButtonListeners() {
+        // Use event delegation since the buttons are dynamically added
+        document.addEventListener('click', (e) => {
+            if (e.target && e.target.classList.contains('holiday-remove')) {
+                // Call removeHoliday with the event object
+                this.removeHoliday(e);
+            }
+        });
+    }
+
+    // Add this new method to update the end date when start date changes
+    updateEndDate(startDate) {
+        if (startDate) {
+            const endDateInput = document.getElementById('holidayEnd');
+            endDateInput.value = startDate;
+        }
+    }
+
+    // Completely revised highlightWorkerAvailability method with additional logging and safeguards
+    highlightWorkerAvailability(workerName, highlight) {
+        // Clear any existing highlights first
+        document.querySelectorAll('.shift-slot.holiday-warning, .shift-slot.preference-highlight').forEach(slot => {
+            slot.classList.remove('holiday-warning', 'preference-highlight');
+        });
+
+        // If not highlighting or no worker specified, just return
+        if (!highlight || !workerName) return;
+
+        // Get worker's settings
+        const workerSettings = this.getStaffSettings(workerName);
+
+        // Process all shift slots
+        const allShiftSlots = document.querySelectorAll('.shift-slot');
+        allShiftSlots.forEach(slot => {
+            if (!slot.dataset.date) return;
+
+            try {
+                // Get the date from the slot
+                const slotDate = new Date(slot.dataset.date);
+                if (isNaN(slotDate.getTime())) return;
+
+                const dateStr = slotDate.toISOString().split('T')[0];
+                const shiftId = slot.dataset.shift;
+
+                // Check if the date is a holiday
+                if (workerSettings.holidays && workerSettings.holidays.includes(dateStr)) {
+                    slot.classList.add('holiday-warning');
+                    return; // If it's a holiday, no need to check preferences
+                }
+
+                // Check if it's a preferred shift
+                if (workerSettings.dayPreferences) {
+                    // Get the day of week (0 = Sunday, 1 = Monday, etc.)
+                    const dayOfWeek = slotDate.getDay();
+                    // Convert to the format used in preferences (mon, tue, etc.)
+                    const days = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+                    const dayKey = days[dayOfWeek];
+
+                    // Check if this shift on this day is preferred
+                    const prefKey = `${shiftId}_${dayKey}`;
+                    if (workerSettings.dayPreferences[prefKey] === true) {
+                        slot.classList.add('preference-highlight');
+                    }
+                }
+            } catch (error) {
+                // Silent error handling
+            }
+        });
+    }
+
+    // Add this new method to ensure consistent date formatting across all shift slots
+    normalizeShiftSlotDates() {
+        const shiftSlots = document.querySelectorAll('.shift-slot');
+        shiftSlots.forEach(slot => {
+            if (slot.dataset.date) {
+                // Ensure the date is properly formatted in ISO format
+                const date = new Date(slot.dataset.date);
+                if (!isNaN(date.getTime())) {
+                    slot.dataset.date = date.toISOString();
+                }
+            }
+        });
+    }
+
+    // Add this method to the ShiftCalendar class
+    initializeHolidayHighlighting() {
+        // Make sure all worker tags are properly initialized for highlight detection
+        const workerTags = document.querySelectorAll('.worker-tag');
+
+        // Remove any existing dragstart listeners to prevent duplicates
+        workerTags.forEach(worker => {
+            const oldWorker = worker.cloneNode(true);
+            worker.parentNode.replaceChild(oldWorker, worker);
+
+            // Re-add the dragstart event with proper highlighting
+            oldWorker.addEventListener('dragstart', (e) => {
+                oldWorker.classList.add('dragging');
+                const workerName = oldWorker.querySelector('span').textContent;
+                e.dataTransfer.setData('text/plain', workerName);
+                e.dataTransfer.effectAllowed = 'move';
+
+                // Use the renamed method
+                requestAnimationFrame(() => {
+                    this.highlightWorkerAvailability(workerName, true);
+                });
+            });
+
+            oldWorker.addEventListener('dragend', () => {
+                oldWorker.classList.remove('dragging');
+                // Use the renamed method
+                this.highlightWorkerAvailability(null, false);
+            });
+        });
+
+        // Ensure all shift slots are properly formatted
+        this.normalizeShiftSlotDates();
+    }
+
+    // Add this new method to update the worker options in the modal with availability information
+    updateWorkerOptionsWithAvailability(date, shift) {
+        const dateStr = date.toISOString().split('T')[0];
+        const dayOfWeek = date.getDay();
+        const days = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+        const dayKey = days[dayOfWeek];
+        const workerOptions = document.querySelectorAll('.worker-option');
+        const shiftId = shift;
+
+        // Define styles for the modal
+        const style = document.createElement('style');
+        if (!document.getElementById('worker-option-styles')) {
+            style.id = 'worker-option-styles';
+            style.textContent = `
+                .worker-option {
+                    transition: all 0.2s;
+                    padding: 8px;
+                    border-radius: 4px;
+                    margin-bottom: 4px;
+                    position: relative;
+                }
+                .worker-option:hover {
+                    background-color: #f8f9fa;
+                }
+                .worker-preferred {
+                    background-color: rgba(144, 238, 144, 0.15);
+                    border-left: 3px solid #4caf50;
+                }
+                .worker-on-holiday {
+                    background-color: rgba(255, 105, 97, 0.1);
+                    border-left: 3px solid #ff6961;
+                    opacity: 0.65;
+                }
+                .availability-indicator {
+                    position: absolute;
+                    right: 10px;
+                    top: 50%;
+                    transform: translateY(-50%);
+                    display: flex;
+                    align-items: center;
+                    gap: 5px;
+                }
+                .preference-icon {
+                    color: #4caf50;
+                    font-size: 16px;
+                }
+                .holiday-icon {
+                    color: #ff6961;
+                    font-size: 16px;
+                }
+            `;
+            document.head.appendChild(style);
+        }
+
+        // Process each worker option
+        workerOptions.forEach(option => {
+            // Clear any existing indicators
+            const existingIndicator = option.querySelector('.availability-indicator');
+            if (existingIndicator) {
+                existingIndicator.remove();
+            }
+
+            // Reset classes
+            option.classList.remove('worker-preferred', 'worker-on-holiday');
+
+            const workerName = option.querySelector('input').value;
+            const workerSettings = this.getStaffSettings(workerName);
+
+            // Create indicator container
+            const indicatorDiv = document.createElement('div');
+            indicatorDiv.className = 'availability-indicator';
+
+            let isOnHoliday = false;
+            let isPreferred = false;
+
+            // Check if worker is on holiday
+            if (workerSettings.holidays && workerSettings.holidays.includes(dateStr)) {
+                isOnHoliday = true;
+                option.classList.add('worker-on-holiday');
+
+                const holidayIcon = document.createElement('span');
+                holidayIcon.className = 'holiday-icon';
+                holidayIcon.textContent = '⚠️';
+                holidayIcon.title = 'On holiday';
+                indicatorDiv.appendChild(holidayIcon);
+            }
+
+            // Check if this is a preferred shift
+            if (!isOnHoliday && workerSettings.dayPreferences) {
+                const prefKey = `${shiftId}_${dayKey}`;
+                if (workerSettings.dayPreferences[prefKey] === true) {
+                    isPreferred = true;
+                    option.classList.add('worker-preferred');
+
+                    const preferenceIcon = document.createElement('span');
+                    preferenceIcon.className = 'preference-icon';
+                    preferenceIcon.textContent = '👍';
+                    preferenceIcon.title = 'Preferred shift';
+                    indicatorDiv.appendChild(preferenceIcon);
+                }
+            }
+
+            // Only append indicator if we have at least one icon
+            if (isOnHoliday || isPreferred) {
+                option.appendChild(indicatorDiv);
+            }
+        });
+
+        // Sort options to show preferred staff first, holiday staff last
+        const workerOptionsContainer = document.querySelector('.worker-options');
+        const options = Array.from(workerOptionsContainer.querySelectorAll('.worker-option'));
+
+        options.sort((a, b) => {
+            const aHoliday = a.classList.contains('worker-on-holiday');
+            const bHoliday = b.classList.contains('worker-on-holiday');
+            const aPreferred = a.classList.contains('worker-preferred');
+            const bPreferred = b.classList.contains('worker-preferred');
+
+            // Sort order: preferred first, then normal, then holiday
+            if (aPreferred && !bPreferred) return -1;
+            if (!aPreferred && bPreferred) return 1;
+            if (aHoliday && !bHoliday) return 1;
+            if (!aHoliday && bHoliday) return -1;
+            return 0;
+        });
+
+        // Reattach sorted options
+        options.forEach(option => {
+            workerOptionsContainer.appendChild(option);
+        });
     }
 }
 
