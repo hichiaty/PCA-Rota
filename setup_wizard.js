@@ -687,13 +687,15 @@ class SetupWizard {
         const hasShiftPatterns = data.shiftPatterns && Array.isArray(data.shiftPatterns);
         const hasAssignments = data.assignments && typeof data.assignments === 'object';
         const hasUserName = data.userName && typeof data.userName === 'string';
+        const hasStaffSettings = data.staffSettings && typeof data.staffSettings === 'object';
 
         // Create a temporary container to store our import results
         const importResults = {
             staff: hasStaff ? data.staff : [],
             shiftPatterns: hasShiftPatterns ? data.shiftPatterns : [],
             assignments: hasAssignments ? data.assignments : {},
-            userName: hasUserName ? data.userName : this.userName || ''
+            userName: hasUserName ? data.userName : this.userName || '',
+            staffSettings: hasStaffSettings ? data.staffSettings : {}
         };
 
         // Show missing data form if necessary
@@ -724,6 +726,14 @@ class SetupWizard {
 
         if (Object.keys(importResults.assignments).length > 0) foundItems.push('Shift assignments');
         else missingItems.push('Shift assignments');
+
+        // Add staff settings to the found items if available
+        if (Object.keys(importResults.staffSettings).length > 0) {
+            const settingsCount = Object.keys(importResults.staffSettings).length;
+            foundItems.push(`Staff settings (${settingsCount} staff members)`);
+        } else {
+            missingItems.push('Staff settings');
+        }
 
         importSection.innerHTML = `
             <div class="import-review p-4">
@@ -820,6 +830,16 @@ class SetupWizard {
                         </div>
                     ` : ''}
                     
+                    ${Object.keys(importResults.staffSettings).length === 0 && importResults.staff.length > 0 ? `
+                        <div class="mb-4 fade-in">
+                            <label class="form-label">Staff Settings</label>
+                            <div class="alert alert-light border">
+                                <i class="bi bi-lightbulb-fill text-warning me-2"></i>
+                                No staff settings found in the backup. Staff preferences and holidays will need to be configured later.
+                            </div>
+                        </div>
+                    ` : ''}
+                    
                     <div class="d-flex justify-content-between mt-5">
                         <button class="btn btn-outline-secondary" id="backToImportBtn">
                             <i class="bi bi-arrow-left me-2"></i>Back
@@ -857,6 +877,10 @@ class SetupWizard {
             
             .fade-in:nth-child(3) {
                 animation-delay: 0.2s;
+            }
+            
+            .fade-in:nth-child(4) {
+                animation-delay: 0.3s;
             }
         `;
         document.head.appendChild(styleEl);
@@ -907,6 +931,14 @@ class SetupWizard {
             localStorage.setItem('shiftAssignments', JSON.stringify(importResults.assignments));
         }
 
+        // Save staff settings if they exist
+        const hasStaffSettings = Object.keys(importResults.staffSettings).length > 0;
+        if (hasStaffSettings) {
+            Object.keys(importResults.staffSettings).forEach(worker => {
+                localStorage.setItem(`staffSettings_${worker}`, JSON.stringify(importResults.staffSettings[worker]));
+            });
+        }
+
         this.userName = importResults.userName;
         localStorage.setItem('userName', importResults.userName);
 
@@ -924,15 +956,22 @@ class SetupWizard {
                         <li><i class="bi bi-check-circle-fill text-success me-2"></i>${importResults.staff.length} staff members ${importResults.staff.length === 0 ? '(will add later)' : ''}</li>
                         ${Object.keys(importResults.assignments).length > 0 ?
                 `<li><i class="bi bi-check-circle-fill text-success me-2"></i>All shift assignments</li>` : ''}
+                        ${hasStaffSettings ?
+                `<li><i class="bi bi-check-circle-fill text-success me-2"></i>Staff settings for ${Object.keys(importResults.staffSettings).length} staff members
+                    <ul class="mt-2 ms-4 small">
+                        <li>Shift preferences by day</li>
+                        <li>Holiday/time-off schedules</li>
+                    </ul>
+                </li>` : ''}
                     </ul>
                 </div>
                 
                 <div class="mt-4">
                     ${importResults.shiftPatterns.length === 0 || importResults.staff.length === 0 ?
                 `<p class="alert alert-info">
-                            <i class="bi bi-info-circle-fill me-2"></i>
-                            You'll need to complete the setup process to configure the missing information.
-                        </p>` : ''
+                        <i class="bi bi-info-circle-fill me-2"></i>
+                        You'll need to complete the setup process to configure the missing information.
+                    </p>` : ''
             }
                     <button class="btn btn-success" id="completeImportBtn">
                         <i class="bi bi-check2-all me-2"></i>Continue with Setup
@@ -1271,6 +1310,14 @@ class SetupWizard {
     }
 
     renderCompleteStep(container) {
+        // Count staff settings in localStorage
+        let staffSettingsCount = 0;
+        this.staffMembers.forEach(worker => {
+            if (localStorage.getItem(`staffSettings_${worker}`)) {
+                staffSettingsCount++;
+            }
+        });
+
         container.innerHTML = `
             <div class="completion-message">
                 <i class="bi bi-check-circle"></i>
@@ -1303,7 +1350,7 @@ class SetupWizard {
                         </ul>
                     </div>
                     
-                    <div class="card">
+                    <div class="card mb-3">
                         <div class="card-header">
                             <strong>Staff Members (${this.staffMembers.length})</strong>
                         </div>
@@ -1313,6 +1360,17 @@ class SetupWizard {
                             `).join('') : '<li class="list-group-item text-muted">No staff members added</li>'}
                         </ul>
                     </div>
+                    
+                    ${staffSettingsCount > 0 ? `
+                    <div class="card mb-3">
+                        <div class="card-header">
+                            <strong>Staff Settings</strong>
+                        </div>
+                        <div class="card-body">
+                            <p class="mb-0">Imported settings for ${staffSettingsCount} staff members including preferences and holidays</p>
+                        </div>
+                    </div>
+                    ` : ''}
                 </div>
                 
                 <p class="mt-4">Click 'Finish Setup' to start using your rota system.</p>
@@ -1347,6 +1405,10 @@ class SetupWizard {
             
             .setup-summary .card:nth-child(3) {
                 animation-delay: 0.4s;
+            }
+            
+            .setup-summary .card:nth-child(4) {
+                animation-delay: 0.6s;
             }
             
             @keyframes summary-item {
