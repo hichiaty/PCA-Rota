@@ -4,6 +4,11 @@ class ShiftCalendar {
         this.currentDate = new Date();
         this.filterWorker = null;
 
+        this.peoplePlannerViewMode = localStorage.getItem('peoplePlannerViewMode') || 'off';
+        this.peoplePlannerDutiesKey = null;
+        this.peoplePlannerDuties = [];
+        this.peoplePlannerViewButtons = null;
+
         // Load shift patterns from localStorage without defaults
         this.shiftPatterns = JSON.parse(localStorage.getItem('shiftPatterns')) || [];
 
@@ -83,6 +88,68 @@ class ShiftCalendar {
                 opacity: 0.9;
                 z-index: 10;
             }
+
+            .shift-slot.pp-has-indicator {
+                position: relative;
+            }
+
+            .shift-slot .pp-match-indicator {
+                position: absolute;
+                top: 2px;
+                left: 2px;
+                width: 14px;
+                height: 14px;
+                border-radius: 50%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 10px;
+                font-weight: bold;
+                color: #fff;
+                z-index: 10;
+            }
+
+            .shift-slot.pp-match-ok .pp-match-indicator {
+                background: #198754;
+            }
+
+            .shift-slot.pp-match-bad .pp-match-indicator {
+                background: #dc3545;
+            }
+
+            .calendar-day .pp-duty {
+                border-radius: 6px;
+                padding: 6px 8px;
+                margin-top: 6px;
+                font-size: 12px;
+                line-height: 1.2;
+                border: 1px solid rgba(0, 0, 0, 0.12);
+                background: rgba(13, 110, 253, 0.12);
+                position: relative;
+            }
+
+            .calendar-day .pp-duty.pp-duty-time-mismatch {
+                background: repeating-linear-gradient(
+                    45deg,
+                    rgba(13, 110, 253, 0.08),
+                    rgba(13, 110, 253, 0.08) 10px,
+                    rgba(13, 110, 253, 0.18) 10px,
+                    rgba(13, 110, 253, 0.18) 20px
+                );
+            }
+
+            .calendar-day .pp-duty .pp-duty-badge {
+                position: absolute;
+                top: 4px;
+                right: 6px;
+                font-size: 11px;
+                font-weight: 700;
+                opacity: 0.85;
+            }
+
+            .calendar-grid.pp-view-only .shift-slot {
+                display: none;
+            }
         `;
         document.head.appendChild(style);
 
@@ -117,6 +184,52 @@ class ShiftCalendar {
         exportButton.textContent = 'Export Month TXT';
         exportButton.addEventListener('click', () => this.exportMonthAssignments());
 
+        const peoplePlannerButton = document.createElement('button');
+        peoplePlannerButton.className = 'export-nav';
+        peoplePlannerButton.textContent = 'PeoplePlanner';
+        peoplePlannerButton.addEventListener('click', () => {
+            void this.openPeoplePlannerSettings();
+        });
+
+        const ppViewGroup = document.createElement('div');
+        ppViewGroup.className = 'btn-group ms-2';
+        ppViewGroup.setAttribute('role', 'group');
+
+        const ppViewOffBtn = document.createElement('button');
+        ppViewOffBtn.type = 'button';
+        ppViewOffBtn.className = 'btn btn-sm btn-outline-secondary';
+        ppViewOffBtn.textContent = 'PP Off';
+        ppViewOffBtn.addEventListener('click', () => {
+            this.setPeoplePlannerViewMode('off');
+        });
+
+        const ppViewOverlayBtn = document.createElement('button');
+        ppViewOverlayBtn.type = 'button';
+        ppViewOverlayBtn.className = 'btn btn-sm btn-outline-secondary';
+        ppViewOverlayBtn.textContent = 'PP Overlay';
+        ppViewOverlayBtn.addEventListener('click', () => {
+            void this.setPeoplePlannerViewMode('overlay');
+        });
+
+        const ppViewOnlyBtn = document.createElement('button');
+        ppViewOnlyBtn.type = 'button';
+        ppViewOnlyBtn.className = 'btn btn-sm btn-outline-secondary';
+        ppViewOnlyBtn.textContent = 'PP Only';
+        ppViewOnlyBtn.addEventListener('click', () => {
+            void this.setPeoplePlannerViewMode('only');
+        });
+
+        ppViewGroup.appendChild(ppViewOffBtn);
+        ppViewGroup.appendChild(ppViewOverlayBtn);
+        ppViewGroup.appendChild(ppViewOnlyBtn);
+
+        this.peoplePlannerViewButtons = {
+            off: ppViewOffBtn,
+            overlay: ppViewOverlayBtn,
+            only: ppViewOnlyBtn
+        };
+        this.updatePeoplePlannerViewButtons();
+
         this.monthDisplay = document.createElement('h2');
         this.updateMonthDisplay();
 
@@ -124,9 +237,170 @@ class ShiftCalendar {
         headerDiv.appendChild(this.monthDisplay);
         headerDiv.appendChild(todayButton);
         headerDiv.appendChild(exportButton);
+        headerDiv.appendChild(peoplePlannerButton);
+        headerDiv.appendChild(ppViewGroup);
         headerDiv.appendChild(nextButton);
 
         calendar.insertBefore(headerDiv, this.calendarGrid);
+    }
+
+    async openPeoplePlannerSettings() {
+        // Create and show the modal
+        const modalHTML = `
+            <div class="modal fade" id="peoplePlannerSettingsModal" tabindex="-1" aria-hidden="true">
+                <div class="modal-dialog modal-lg">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title">PeoplePlanner Settings</h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="alert alert-light border">
+                                Configure your PeoplePlanner connection details. These are stored in localStorage in an encrypted format.
+                            </div>
+
+                            <div class="row g-3">
+                                <div class="col-12">
+                                    <label class="form-label" for="ppBaseUrl">PeoplePlanner Base URL</label>
+                                    <input type="url" class="form-control" id="ppBaseUrl" placeholder="https://service....peopleplanner.biz">
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label" for="ppEmail">Email</label>
+                                    <input type="email" class="form-control" id="ppEmail" placeholder="you@example.com">
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label" for="ppPassword">Password</label>
+                                    <input type="password" class="form-control" id="ppPassword" placeholder="Password">
+                                </div>
+                                <div class="col-12">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" value="" id="ppShowPassword">
+                                        <label class="form-check-label" for="ppShowPassword">Show password</label>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="mt-4">
+                                <div class="d-flex flex-wrap gap-2 justify-content-between">
+                                    <div class="d-flex flex-wrap gap-2">
+                                        <button class="btn btn-primary" id="ppSaveBtn">Save</button>
+                                        <button class="btn btn-outline-secondary" id="ppTestBtn">Test connection</button>
+                                    </div>
+                                    <button class="btn btn-outline-danger" id="ppClearBtn">Clear</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        const existingModal = document.getElementById('peoplePlannerSettingsModal');
+        if (existingModal) {
+            existingModal.remove();
+        }
+        document.body.insertAdjacentHTML('beforeend', modalHTML);
+
+        const baseUrlEl = document.getElementById('ppBaseUrl');
+        const emailEl = document.getElementById('ppEmail');
+        const passwordEl = document.getElementById('ppPassword');
+        const showPasswordEl = document.getElementById('ppShowPassword');
+
+        showPasswordEl.addEventListener('change', () => {
+            passwordEl.type = showPasswordEl.checked ? 'text' : 'password';
+        });
+
+        if (!window.PeoplePlanner) {
+            this.showToast('PeoplePlanner module not loaded', 'warning');
+        } else {
+            try {
+                const existing = await window.PeoplePlanner.loadSettings();
+                if (existing) {
+                    baseUrlEl.value = existing.baseUrl || '';
+                    emailEl.value = existing.email || '';
+                    passwordEl.value = existing.password || '';
+                }
+            } catch (e) {
+                this.showToast('Unable to read PeoplePlanner settings', 'warning');
+            }
+        }
+
+        document.getElementById('ppSaveBtn').addEventListener('click', async () => {
+            if (!window.PeoplePlanner) {
+                this.showToast('PeoplePlanner module not loaded', 'warning');
+                return;
+            }
+
+            const baseUrl = baseUrlEl.value.trim();
+            const email = emailEl.value.trim();
+            const password = passwordEl.value;
+
+            const anyProvided = Boolean(baseUrl || email || password);
+            if (anyProvided && (!baseUrl || !email || !password)) {
+                alert('Please provide Base URL, Email, and Password (or clear all fields).');
+                return;
+            }
+
+            if (!anyProvided) {
+                localStorage.removeItem(window.PeoplePlanner.SETTINGS_STORAGE_KEY);
+                localStorage.removeItem(window.PeoplePlanner.CRYPTO_KEY_STORAGE_KEY);
+                this.showToast('PeoplePlanner settings cleared');
+                return;
+            }
+
+            try {
+                await window.PeoplePlanner.saveSettings({ baseUrl, email, password });
+                this.showToast('PeoplePlanner settings saved');
+            } catch (e) {
+                this.showToast('Failed to save PeoplePlanner settings', 'warning');
+            }
+        });
+
+        document.getElementById('ppClearBtn').addEventListener('click', () => {
+            if (!window.PeoplePlanner) {
+                this.showToast('PeoplePlanner module not loaded', 'warning');
+                return;
+            }
+
+            if (confirm('Clear PeoplePlanner settings from this browser?')) {
+                localStorage.removeItem(window.PeoplePlanner.SETTINGS_STORAGE_KEY);
+                localStorage.removeItem(window.PeoplePlanner.CRYPTO_KEY_STORAGE_KEY);
+                baseUrlEl.value = '';
+                emailEl.value = '';
+                passwordEl.value = '';
+                this.showToast('PeoplePlanner settings cleared');
+            }
+        });
+
+        document.getElementById('ppTestBtn').addEventListener('click', async () => {
+            if (!window.PeoplePlanner) {
+                this.showToast('PeoplePlanner module not loaded', 'warning');
+                return;
+            }
+
+            const baseUrl = baseUrlEl.value.trim();
+            const email = emailEl.value.trim();
+            const password = passwordEl.value;
+
+            if (!baseUrl || !email || !password) {
+                alert('Please provide Base URL, Email, and Password to test.');
+                return;
+            }
+
+            try {
+                const client = new window.PeoplePlanner.PeoplePlannerClient(baseUrl);
+                await client.authenticate(email, password);
+                this.showToast('PeoplePlanner connection OK');
+            } catch (e) {
+                this.showToast('PeoplePlanner test failed (check URL/credentials/CORS)', 'warning');
+            }
+        });
+
+        const modal = new bootstrap.Modal(document.getElementById('peoplePlannerSettingsModal'));
+        modal.show();
     }
 
     updateMonthDisplay() {
@@ -142,6 +416,7 @@ class ShiftCalendar {
         this.initializeCalendar();
         this.setupDragAndDrop();
         this.updateWorkerCounts();
+        void this.refreshPeoplePlannerOverlay();
     }
 
     goToToday() {
@@ -151,6 +426,7 @@ class ShiftCalendar {
         this.initializeCalendar();
         this.setupDragAndDrop();
         this.updateWorkerCounts();
+        void this.refreshPeoplePlannerOverlay();
     }
 
     initializeCalendar() {
@@ -212,6 +488,8 @@ class ShiftCalendar {
 
         // Ensure shift slots have properly formatted dates to fix highlighting issues
         this.normalizeShiftSlotDates();
+
+        void this.refreshPeoplePlannerOverlay();
     }
 
     createDayCellContent(day, isCurrentMonth = true) {
@@ -235,7 +513,7 @@ class ShiftCalendar {
                      data-bs-toggle="modal" data-bs-target="#shiftModal"
                      style="cursor: pointer">
                     <span class="shift-time">${shift.startTime} - ${shift.endTime}</span>
-                    ${assignment}
+                    <span class="shift-assignment">${assignment}</span>
                 </div>
             `;
         }).join('');
@@ -299,7 +577,8 @@ class ShiftCalendar {
             if (!slot) return;
 
             if (!slot.classList.contains('unassigned')) {
-                const workerName = slot.textContent.replace(slot.querySelector('.shift-time').textContent, '').trim();
+                const assignmentSpan = slot.querySelector('.shift-assignment');
+                const workerName = assignmentSpan ? assignmentSpan.textContent.trim() : '';
                 e.dataTransfer.setData('text/plain', workerName);
                 e.dataTransfer.effectAllowed = 'move';
                 slot.classList.add('dragging');
@@ -355,7 +634,6 @@ class ShiftCalendar {
         const assignments = this.getStoredAssignments();
         const key = this.getStorageKey(date, shift);
         assignments[key] = worker;
-        console.log('Saving assignment:', { key, worker, allAssignments: assignments });
         localStorage.setItem('shiftAssignments', JSON.stringify(assignments));
     }
 
@@ -511,24 +789,543 @@ class ShiftCalendar {
             }
         }
 
-        const timeSpan = slot.querySelector('.shift-time');
-        slot.textContent = '';
-        slot.appendChild(timeSpan);
-        slot.appendChild(document.createTextNode(worker));
+        const assignmentSpan = slot.querySelector('.shift-assignment');
+        if (assignmentSpan) {
+            assignmentSpan.textContent = worker;
+        } else {
+            const timeSpan = slot.querySelector('.shift-time');
+            slot.textContent = '';
+            if (timeSpan) {
+                slot.appendChild(timeSpan);
+            }
+            const newAssignmentSpan = document.createElement('span');
+            newAssignmentSpan.className = 'shift-assignment';
+            newAssignmentSpan.textContent = worker;
+            slot.appendChild(newAssignmentSpan);
+        }
         slot.classList.remove('unassigned');
         this.saveAssignment(date, shift, worker);
         this.updateWorkerCounts();
+        void this.refreshPeoplePlannerOverlay();
         return true;
     }
 
     unassignWorker(slot, date, shift) {
-        const timeSpan = slot.querySelector('.shift-time');
-        slot.textContent = '';
-        slot.appendChild(timeSpan);
-        slot.appendChild(document.createTextNode('unassigned'));
+        const assignmentSpan = slot.querySelector('.shift-assignment');
+        if (assignmentSpan) {
+            assignmentSpan.textContent = 'unassigned';
+        } else {
+            const timeSpan = slot.querySelector('.shift-time');
+            slot.textContent = '';
+            if (timeSpan) {
+                slot.appendChild(timeSpan);
+            }
+            const newAssignmentSpan = document.createElement('span');
+            newAssignmentSpan.className = 'shift-assignment';
+            newAssignmentSpan.textContent = 'unassigned';
+            slot.appendChild(newAssignmentSpan);
+        }
         slot.classList.add('unassigned');
         this.saveAssignment(date, shift, 'unassigned');
         this.updateWorkerCounts();
+        void this.refreshPeoplePlannerOverlay();
+    }
+
+    updatePeoplePlannerViewButtons() {
+        if (!this.peoplePlannerViewButtons) {
+            return;
+        }
+
+        const modes = ['off', 'overlay', 'only'];
+        modes.forEach(mode => {
+            const btn = this.peoplePlannerViewButtons[mode];
+            if (!btn) return;
+            const isActive = this.peoplePlannerViewMode === mode;
+            btn.classList.toggle('btn-secondary', isActive);
+            btn.classList.toggle('btn-outline-secondary', !isActive);
+        });
+    }
+
+    async setPeoplePlannerViewMode(mode) {
+        const allowed = ['off', 'overlay', 'only'];
+        if (!allowed.includes(mode)) {
+            return;
+        }
+
+        this.peoplePlannerViewMode = mode;
+        localStorage.setItem('peoplePlannerViewMode', mode);
+        this.updatePeoplePlannerViewButtons();
+        await this.refreshPeoplePlannerOverlay();
+    }
+
+    formatDateStamp(date) {
+        const y = date.getFullYear();
+        const m = String(date.getMonth() + 1).padStart(2, '0');
+        const d = String(date.getDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
+    }
+
+    parseTimeToMinutes(hhmm) {
+        const [h, m] = String(hhmm || '').split(':').map(Number);
+        if (!Number.isFinite(h) || !Number.isFinite(m)) {
+            return null;
+        }
+        return (h * 60) + m;
+    }
+
+    formatTimeHHMM(date) {
+        const hh = String(date.getHours()).padStart(2, '0');
+        const mm = String(date.getMinutes()).padStart(2, '0');
+        return `${hh}:${mm}`;
+    }
+
+    getVisibleDateRange() {
+        const shiftSlots = Array.from(document.querySelectorAll('.shift-slot'));
+        if (shiftSlots.length === 0) {
+            return null;
+        }
+
+        let minTime = null;
+        let maxTime = null;
+        let minStamp = null;
+        let maxStamp = null;
+
+        shiftSlots.forEach(slot => {
+            const d = new Date(slot.dataset.date);
+            if (isNaN(d.getTime())) {
+                return;
+            }
+
+            const stamp = this.formatDateStamp(d);
+            const t = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+            if (minTime === null || t < minTime) {
+                minTime = t;
+                minStamp = stamp;
+            }
+            if (maxTime === null || t > maxTime) {
+                maxTime = t;
+                maxStamp = stamp;
+            }
+        });
+
+        if (!minStamp || !maxStamp) {
+            return null;
+        }
+
+        return { rangeFrom: minStamp, rangeTo: maxStamp };
+    }
+
+    parsePeoplePlannerDateTime(value) {
+        if (!value || typeof value !== 'string') {
+            return null;
+        }
+
+        const parts = value.trim().split(' ');
+        if (parts.length < 2) {
+            return null;
+        }
+
+        const [y, m, d] = parts[0].split('-').map(Number);
+        const timeParts = parts[1].split(':').map(Number);
+        const hh = timeParts[0];
+        const mm = timeParts[1];
+        const ss = timeParts.length >= 3 ? timeParts[2] : 0;
+
+        if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d) ||
+            !Number.isFinite(hh) || !Number.isFinite(mm) || !Number.isFinite(ss)) {
+            return null;
+        }
+
+        return new Date(y, m - 1, d, hh, mm, ss);
+    }
+
+    normalizePersonName(name) {
+        if (!name || typeof name !== 'string') {
+            return '';
+        }
+
+        const cleaned = name.trim().replace(/\s+/g, ' ');
+        if (cleaned.includes(',')) {
+            const parts = cleaned.split(',');
+            const last = (parts[0] || '').trim();
+            const first = (parts[1] || '').trim();
+            return `${first} ${last}`.trim().toLowerCase();
+        }
+
+        return cleaned.toLowerCase();
+    }
+
+    getPeoplePlannerNameCandidates(workerName) {
+        const name = String(workerName || '').trim();
+        if (!name) {
+            return [];
+        }
+
+        const candidates = new Set();
+        candidates.add(this.normalizePersonName(name));
+
+        try {
+            const settings = this.getStaffSettings(name);
+            const alias = String(settings.peoplePlannerAlias || '').trim();
+            if (alias) {
+                candidates.add(this.normalizePersonName(alias));
+            }
+        } catch (e) {
+        }
+
+        return Array.from(candidates).filter(Boolean);
+    }
+
+    clearPeoplePlannerOverlay() {
+        document.querySelectorAll('.pp-duty').forEach(el => el.remove());
+
+        const shiftSlots = document.querySelectorAll('.shift-slot');
+        shiftSlots.forEach(slot => {
+            slot.classList.remove('pp-has-indicator', 'pp-match-ok', 'pp-match-bad');
+            const indicator = slot.querySelector('.pp-match-indicator');
+            if (indicator) {
+                indicator.remove();
+            }
+        });
+
+        this.calendarGrid.classList.remove('pp-view-only');
+    }
+
+    extractPeoplePlannerDuties(resp) {
+        if (Array.isArray(resp)) {
+            return resp;
+        }
+
+        if (!resp || typeof resp !== 'object') {
+            return null;
+        }
+
+        const looksLikeDuty = (item) => {
+            return item && typeof item === 'object' &&
+                typeof item.StartDateTime === 'string' &&
+                typeof item.EndDateTime === 'string';
+        };
+
+        const scan = (node, depth) => {
+            if (depth <= 0 || node === null || node === undefined) {
+                return null;
+            }
+
+            if (Array.isArray(node)) {
+                if (node.length > 0 && looksLikeDuty(node[0])) {
+                    return node;
+                }
+                for (const item of node) {
+                    const found = scan(item, depth - 1);
+                    if (found) return found;
+                }
+                return null;
+            }
+
+            if (typeof node !== 'object') {
+                return null;
+            }
+
+            for (const k of Object.keys(node)) {
+                const found = scan(node[k], depth - 1);
+                if (found) return found;
+            }
+
+            return null;
+        };
+
+        if (Array.isArray(resp.Duties)) {
+            return resp.Duties;
+        }
+        if (Array.isArray(resp.duties)) {
+            return resp.duties;
+        }
+
+        return scan(resp, 5);
+    }
+
+    async ensurePeoplePlannerDutiesForVisibleRange() {
+        if (!window.PeoplePlanner) {
+            throw new Error('PeoplePlanner module not loaded');
+        }
+
+        const range = this.getVisibleDateRange();
+        if (!range) {
+            return [];
+        }
+
+        const key = `${range.rangeFrom}_${range.rangeTo}`;
+        if (this.peoplePlannerDutiesKey === key && Array.isArray(this.peoplePlannerDuties)) {
+            return this.peoplePlannerDuties;
+        }
+
+        const client = await window.PeoplePlanner.createAuthenticatedClientFromStorage();
+        const resp = await client.getDuties({ rangeFrom: range.rangeFrom, rangeTo: range.rangeTo });
+
+        const duties = this.extractPeoplePlannerDuties(resp);
+        if (!Array.isArray(duties)) {
+            let keys = '';
+            try {
+                keys = resp && typeof resp === 'object' ? Object.keys(resp).join(', ') : '';
+            } catch (e) {
+            }
+            const type = Array.isArray(resp) ? 'array' : typeof resp;
+            throw new Error(`Unexpected PeoplePlanner duties response (type: ${type}${keys ? `, keys: ${keys}` : ''})`);
+        }
+
+        this.peoplePlannerDutiesKey = key;
+        this.peoplePlannerDuties = duties;
+        return duties;
+    }
+
+    buildPeoplePlannerDutyElement(duty, opts) {
+        const start = opts.start;
+        const end = opts.end;
+        const employee = duty.EmployeeName || '';
+        const type = duty.ServiceRequirementTypeDescription || duty.ServiceTypeDescription || 'Duty';
+
+        const div = document.createElement('div');
+        div.className = 'pp-duty';
+        if (opts.timeMismatch) {
+            div.classList.add('pp-duty-time-mismatch');
+        }
+
+        const startStr = start ? this.formatTimeHHMM(start) : '';
+        const endStr = end ? this.formatTimeHHMM(end) : '';
+        div.textContent = `${startStr}-${endStr} ${employee}`.trim();
+        div.title = `${type}\n${duty.ServiceLocationName || ''}`.trim();
+
+        if (opts.badgeText) {
+            const badge = document.createElement('span');
+            badge.className = 'pp-duty-badge';
+            badge.textContent = opts.badgeText;
+            div.appendChild(badge);
+        }
+
+        return div;
+    }
+
+    applyPeoplePlannerOverlay(duties) {
+        this.clearPeoplePlannerOverlay();
+
+        const mode = this.peoplePlannerViewMode;
+        if (mode === 'off') {
+            return;
+        }
+
+        this.calendarGrid.classList.toggle('pp-view-only', mode === 'only');
+
+        const shiftSlots = Array.from(document.querySelectorAll('.shift-slot'));
+        const slotIndex = new Map();
+        const dayCellIndex = new Map();
+
+        shiftSlots.forEach(slot => {
+            const slotDate = new Date(slot.dataset.date);
+            if (isNaN(slotDate.getTime())) {
+                return;
+            }
+
+            const dateStamp = this.formatDateStamp(slotDate);
+            const shiftId = parseInt(slot.dataset.shift);
+            const shiftPattern = this.shiftPatterns.find(sp => sp.id === shiftId);
+            const dayCell = slot.closest('.calendar-day');
+            if (dayCell) {
+                dayCellIndex.set(dateStamp, dayCell);
+            }
+
+            if (!shiftPattern) {
+                return;
+            }
+
+            const startMin = this.parseTimeToMinutes(shiftPattern.startTime);
+            let endMin = this.parseTimeToMinutes(shiftPattern.endTime);
+            if (startMin === null || endMin === null) {
+                return;
+            }
+            if (endMin < startMin) {
+                endMin += 1440;
+            }
+
+            const key = `${dateStamp}|${startMin}|${endMin}`;
+            const existing = slotIndex.get(key) || [];
+            existing.push({
+                slot,
+                slotDate,
+                shiftId
+            });
+            slotIndex.set(key, existing);
+        });
+
+        const dutyGroups = new Map();
+        duties.forEach(duty => {
+            const start = this.parsePeoplePlannerDateTime(duty.StartDateTime);
+            const end = this.parsePeoplePlannerDateTime(duty.EndDateTime);
+            if (!start || !end) {
+                return;
+            }
+
+            const dateStamp = this.formatDateStamp(start);
+            const startMin = (start.getHours() * 60) + start.getMinutes();
+            let endMin = (end.getHours() * 60) + end.getMinutes();
+
+            const crossesMidnight = end.getFullYear() !== start.getFullYear() ||
+                end.getMonth() !== start.getMonth() ||
+                end.getDate() !== start.getDate() ||
+                endMin < startMin;
+            if (crossesMidnight) {
+                endMin += 1440;
+            }
+
+            const key = `${dateStamp}|${startMin}|${endMin}`;
+            const existing = dutyGroups.get(key) || [];
+            existing.push({ duty, start, end, dateStamp });
+            dutyGroups.set(key, existing);
+        });
+
+        dutyGroups.forEach((groupDuties, key) => {
+            const slotInfos = (slotIndex.get(key) || []).slice().sort((a, b) => {
+                const sa = Number(a.shiftId);
+                const sb = Number(b.shiftId);
+                if (Number.isFinite(sa) && Number.isFinite(sb) && sa !== sb) {
+                    return sa - sb;
+                }
+                const da = a.slotDate ? a.slotDate.getTime() : 0;
+                const db = b.slotDate ? b.slotDate.getTime() : 0;
+                if (da !== db) {
+                    return da - db;
+                }
+                return String(a.shiftId).localeCompare(String(b.shiftId));
+            });
+            const sortedDuties = groupDuties.slice().sort((a, b) => {
+                const an = this.normalizePersonName(a.duty.EmployeeName || '');
+                const bn = this.normalizePersonName(b.duty.EmployeeName || '');
+                if (an !== bn) {
+                    return an.localeCompare(bn);
+                }
+                const ak = `${String(a.duty.ServiceRequirementTypeDescription || a.duty.ServiceTypeDescription || '')}|${String(a.duty.StartDateTime || '')}|${String(a.duty.EndDateTime || '')}`;
+                const bk = `${String(b.duty.ServiceRequirementTypeDescription || b.duty.ServiceTypeDescription || '')}|${String(b.duty.StartDateTime || '')}|${String(b.duty.EndDateTime || '')}`;
+                return ak.localeCompare(bk);
+            });
+            const dateStamp = groupDuties[0] ? groupDuties[0].dateStamp : null;
+            const dayCell = dateStamp ? dayCellIndex.get(dateStamp) : null;
+
+            if (slotInfos.length === 0) {
+                if (!dayCell) {
+                    return;
+                }
+                groupDuties.forEach(({ duty, start, end }) => {
+                    const el = this.buildPeoplePlannerDutyElement(duty, { start, end, timeMismatch: true, badgeText: 'PP' });
+                    if (mode === 'overlay' || mode === 'only') {
+                        dayCell.appendChild(el);
+                    }
+                });
+                return;
+            }
+
+            const usedSlots = new Set();
+            const usedDuties = new Set();
+
+            const assignDutyToSlot = ({ duty, start, end }, assignedSlotInfo) => {
+                usedSlots.add(assignedSlotInfo.slot);
+                usedDuties.add(duty);
+
+                const assignment = this.getAssignment(assignedSlotInfo.slotDate, String(assignedSlotInfo.shiftId));
+                const ppName = this.normalizePersonName(duty.EmployeeName || '');
+                const candidates = assignment === 'unassigned' ? [] : this.getPeoplePlannerNameCandidates(assignment);
+                const matches = assignment !== 'unassigned' && ppName && candidates.includes(ppName);
+
+                assignedSlotInfo.slot.classList.add('pp-has-indicator');
+                assignedSlotInfo.slot.classList.toggle('pp-match-ok', matches);
+                assignedSlotInfo.slot.classList.toggle('pp-match-bad', !matches);
+
+                let indicator = assignedSlotInfo.slot.querySelector('.pp-match-indicator');
+                if (!indicator) {
+                    indicator = document.createElement('span');
+                    indicator.className = 'pp-match-indicator';
+                    indicator.setAttribute('draggable', 'false');
+                    assignedSlotInfo.slot.appendChild(indicator);
+                }
+                indicator.textContent = matches ? '✓' : '!';
+                indicator.title = matches ? 'Matches PeoplePlanner' : 'Does not match PeoplePlanner';
+
+                if (mode === 'only' && dayCell) {
+                    const badgeText = matches ? '✓' : '!';
+                    const el = this.buildPeoplePlannerDutyElement(duty, { start, end, timeMismatch: false, badgeText });
+                    dayCell.appendChild(el);
+                }
+            };
+
+            const takeFirstFreeSlot = () => {
+                for (const slotInfo of slotInfos) {
+                    if (!usedSlots.has(slotInfo.slot)) {
+                        return slotInfo;
+                    }
+                }
+                return null;
+            };
+
+            // Pass 1: deterministically assign matching duties to matching slots
+            slotInfos.forEach(slotInfo => {
+                if (usedSlots.has(slotInfo.slot)) {
+                    return;
+                }
+                const assignment = this.getAssignment(slotInfo.slotDate, String(slotInfo.shiftId));
+                if (assignment === 'unassigned') {
+                    return;
+                }
+                const candidates = this.getPeoplePlannerNameCandidates(assignment);
+                if (candidates.length === 0) {
+                    return;
+                }
+
+                const match = sortedDuties.find(d => {
+                    if (usedDuties.has(d.duty)) {
+                        return false;
+                    }
+                    const ppName = this.normalizePersonName(d.duty.EmployeeName || '');
+                    return ppName && candidates.includes(ppName);
+                });
+
+                if (match) {
+                    assignDutyToSlot(match, slotInfo);
+                }
+            });
+
+            // Pass 2: assign remaining duties to remaining slots in a stable order
+            sortedDuties.forEach(({ duty, start, end }) => {
+                if (usedDuties.has(duty)) {
+                    return;
+                }
+                const assignedSlotInfo = takeFirstFreeSlot();
+
+                if (!assignedSlotInfo) {
+                    if (dayCell && (mode === 'overlay' || mode === 'only')) {
+                        const el = this.buildPeoplePlannerDutyElement(duty, { start, end, timeMismatch: false, badgeText: 'PP' });
+                        dayCell.appendChild(el);
+                    }
+                    return;
+                }
+
+                assignDutyToSlot({ duty, start, end }, assignedSlotInfo);
+            });
+        });
+    }
+
+    async refreshPeoplePlannerOverlay() {
+        const mode = this.peoplePlannerViewMode;
+        if (mode === 'off') {
+            this.clearPeoplePlannerOverlay();
+            return;
+        }
+
+        try {
+            const duties = await this.ensurePeoplePlannerDutiesForVisibleRange();
+            this.applyPeoplePlannerOverlay(duties);
+        } catch (e) {
+            this.clearPeoplePlannerOverlay();
+            const msg = (e && e.message) ? e.message : String(e);
+            this.showToast(`PeoplePlanner overlay unavailable: ${msg}`, 'warning');
+        }
     }
 
     generateWorkerICS(worker) {
@@ -541,20 +1338,15 @@ class ShiftCalendar {
         // Get the shift patterns for names and times
         const shiftPatterns = this.shiftPatterns;
 
-        console.log('Generating ICS for:', worker);
-        console.log('All assignments:', assignments);
-
         // Go through all assignments to find this worker's shifts
         for (let key in assignments) {
             if (assignments[key] === worker) {
-                console.log('Found shift:', key);
                 const [year, month, day, shiftId] = key.split('-').map(Number);
 
                 // Find the shift pattern details
                 const shiftPattern = shiftPatterns.find(sp => sp.id === shiftId);
 
                 if (!shiftPattern) {
-                    console.warn(`Shift pattern ${shiftId} not found for assignment ${key}`);
                     continue;
                 }
 
@@ -596,8 +1388,6 @@ class ShiftCalendar {
                     displayInfo: `From ${shiftPattern.startTime} ${startDate.toDateString()} to ${shiftPattern.endTime} ${endDate.toDateString()}`
                 };
                 events.push(event);
-                console.log('Added event:', event);
-                console.log('Shift duration:', event.displayInfo);
             }
         }
 
@@ -621,7 +1411,6 @@ class ShiftCalendar {
             'END:VCALENDAR'
         ].join('\r\n');
 
-        console.log('Generated ICS content:', icsContent);
         return icsContent;
     }
 
@@ -771,7 +1560,8 @@ class ShiftCalendar {
         } else {
             // Show only selected worker's shifts
             slots.forEach(slot => {
-                const assignment = slot.textContent.replace(slot.querySelector('.shift-time').textContent, '').trim();
+                const assignmentSpan = slot.querySelector('.shift-assignment');
+                const assignment = assignmentSpan ? assignmentSpan.textContent.trim() : '';
                 if (assignment === workerName || assignment === 'unassigned') {
                     slot.style.opacity = '1';
                     slot.style.filter = 'none';
@@ -983,6 +1773,75 @@ class ShiftCalendar {
         }
     }
 
+    renameStaffMember(oldName, newName) {
+        const from = String(oldName || '').trim();
+        const to = String(newName || '').trim();
+
+        if (!from || !to) {
+            this.showToast('Please provide a name', 'warning');
+            return false;
+        }
+
+        if (from === to) {
+            return true;
+        }
+
+        let workers = JSON.parse(localStorage.getItem('staffMembers')) || [];
+        if (!Array.isArray(workers)) {
+            workers = [];
+        }
+
+        if (!workers.includes(from)) {
+            this.showToast('Staff member not found', 'warning');
+            return false;
+        }
+
+        if (workers.includes(to)) {
+            this.showToast('A staff member with that name already exists', 'warning');
+            return false;
+        }
+
+        workers = workers.map(w => (w === from ? to : w));
+        localStorage.setItem('staffMembers', JSON.stringify(workers));
+
+        const oldSettingsKey = `staffSettings_${from}`;
+        const newSettingsKey = `staffSettings_${to}`;
+        const existingNewSettings = localStorage.getItem(newSettingsKey);
+        if (existingNewSettings) {
+            this.showToast('Cannot rename: destination settings already exist', 'warning');
+            return false;
+        }
+
+        const oldSettings = localStorage.getItem(oldSettingsKey);
+        if (oldSettings) {
+            localStorage.setItem(newSettingsKey, oldSettings);
+            localStorage.removeItem(oldSettingsKey);
+        }
+
+        const assignments = this.getStoredAssignments();
+        let updated = false;
+        for (let key in assignments) {
+            if (assignments[key] === from) {
+                assignments[key] = to;
+                updated = true;
+            }
+        }
+        if (updated) {
+            localStorage.setItem('shiftAssignments', JSON.stringify(assignments));
+        }
+
+        this.loadWorkers();
+        this.calendarGrid.innerHTML = '';
+        this.initializeCalendar();
+        this.setupDragAndDrop();
+        this.updateWorkerCounts();
+        this.updateModalWorkerOptions();
+        void this.refreshPeoplePlannerOverlay();
+
+        this.showToast('Staff member renamed');
+        return true;
+    }
+
     // Helper method to update the modal worker options
     updateModalWorkerOptions() {
         const workers = JSON.parse(localStorage.getItem('staffMembers')) || [];
@@ -1052,6 +1911,10 @@ class ShiftCalendar {
             userName: localStorage.getItem('userName') || '',
             setupComplete: localStorage.getItem('setupComplete') === 'true',
             staffSettings: staffSettings, // Add staff settings to the export data
+            peoplePlanner: {
+                settingsEnc: localStorage.getItem('peoplePlannerSettingsEnc') || null,
+                cryptoKey: localStorage.getItem('peoplePlannerCryptoKey') || null
+            },
             timestamp: new Date().toISOString()
         };
 
@@ -1108,6 +1971,9 @@ class ShiftCalendar {
                     // Check if staff settings are included in the backup
                     const hasStaffSettings = data.staffSettings && typeof data.staffSettings === 'object';
 
+                    const hasPeoplePlanner = data.peoplePlanner && typeof data.peoplePlanner === 'object' &&
+                        (data.peoplePlanner.settingsEnc || data.peoplePlanner.cryptoKey);
+
                     // Show a more detailed confirmation message
                     const message = `This will replace your current configuration with:
                     ${data.userName ? `• User name: ${data.userName}` : ''}
@@ -1115,6 +1981,7 @@ class ShiftCalendar {
                     • ${data.shiftPatterns ? data.shiftPatterns.length : 0} shift pattern(s)
                     • All shift assignments
                     ${hasStaffSettings ? `• Staff settings (preferences & holidays)` : ''}
+                    ${hasPeoplePlanner ? `• PeoplePlanner settings` : ''}
                     
                     Continue?`;
 
@@ -1147,6 +2014,20 @@ class ShiftCalendar {
                             Object.keys(data.staffSettings).forEach(worker => {
                                 localStorage.setItem(`staffSettings_${worker}`, JSON.stringify(data.staffSettings[worker]));
                             });
+                        }
+
+                        if (hasPeoplePlanner) {
+                            if (data.peoplePlanner.settingsEnc) {
+                                localStorage.setItem('peoplePlannerSettingsEnc', data.peoplePlanner.settingsEnc);
+                            } else {
+                                localStorage.removeItem('peoplePlannerSettingsEnc');
+                            }
+
+                            if (data.peoplePlanner.cryptoKey) {
+                                localStorage.setItem('peoplePlannerCryptoKey', data.peoplePlanner.cryptoKey);
+                            } else {
+                                localStorage.removeItem('peoplePlannerCryptoKey');
+                            }
                         }
 
                         // Reload the UI
@@ -1188,16 +2069,39 @@ class ShiftCalendar {
         // Get existing settings or create default ones
         const staffSettings = this.getStaffSettings(workerName);
 
-        // Create and show the modal
-        const modalHTML = `
-            <div class="modal fade" id="staffSettingsModal" tabindex="-1" aria-hidden="true">
-                <div class="modal-dialog modal-lg">
-                    <div class="modal-content">
+        const modalContentHTML = `
                         <div class="modal-header">
                             <h5 class="modal-title">Settings for ${workerName}</h5>
                             <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                         </div>
                         <div class="modal-body">
+                            <div class="card mb-3">
+                                <div class="card-header bg-light d-flex justify-content-between align-items-center">
+                                    <h6 class="mb-0">Staff Name</h6>
+                                </div>
+                                <div class="card-body">
+                                    <div class="row g-2 align-items-end">
+                                        <div class="col-12 col-md-8">
+                                            <label class="form-label" for="renameStaffInput">Name</label>
+                                            <input type="text" class="form-control" id="renameStaffInput" value="${workerName}">
+                                        </div>
+                                        <div class="col-12 col-md-4 d-grid">
+                                            <button class="btn btn-outline-primary" type="button" id="renameStaffBtn">Rename</button>
+                                        </div>
+                                    </div>
+
+                                    <div class="row g-2 mt-2 align-items-end">
+                                        <div class="col-12 col-md-8">
+                                            <label class="form-label" for="ppAliasInput">PeoplePlanner Alias <span class="text-muted">(Optional)</span></label>
+                                            <input type="text" class="form-control" id="ppAliasInput" value="${String(staffSettings.peoplePlannerAlias || '')}">
+                                        </div>
+                                        <div class="col-12 col-md-4 d-grid">
+                                            <button class="btn btn-outline-secondary" type="button" id="ppAliasSaveBtn">Save alias</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
                             <ul class="nav nav-tabs mb-3" id="settingsTabs" role="tablist">
                                 <li class="nav-item" role="presentation">
                                     <button class="nav-link active" id="preferences-tab" data-bs-toggle="tab" 
@@ -1304,19 +2208,60 @@ class ShiftCalendar {
                         <div class="modal-footer">
                             <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
                         </div>
-                    </div>
-                </div>
-            </div>
         `;
 
-        // Remove existing modal if present
-        const existingModal = document.getElementById('staffSettingsModal');
-        if (existingModal) {
-            existingModal.remove();
+        let modalEl = document.getElementById('staffSettingsModal');
+        if (!modalEl) {
+            const wrapper = `
+                <div class="modal fade" id="staffSettingsModal" tabindex="-1" aria-hidden="true">
+                    <div class="modal-dialog modal-lg">
+                        <div class="modal-content"></div>
+                    </div>
+                </div>
+            `;
+            document.body.insertAdjacentHTML('beforeend', wrapper);
+            modalEl = document.getElementById('staffSettingsModal');
         }
 
-        // Add modal to document
-        document.body.insertAdjacentHTML('beforeend', modalHTML);
+        modalEl.querySelector('.modal-content').innerHTML = modalContentHTML;
+
+        const renameInput = modalEl.querySelector('#renameStaffInput');
+        const renameBtn = modalEl.querySelector('#renameStaffBtn');
+        const ppAliasInput = modalEl.querySelector('#ppAliasInput');
+        const ppAliasSaveBtn = modalEl.querySelector('#ppAliasSaveBtn');
+
+        const bsModal = bootstrap.Modal.getInstance(modalEl) || new bootstrap.Modal(modalEl);
+
+        const doRename = () => {
+            const nextName = renameInput.value;
+            const ok = this.renameStaffMember(workerName, nextName);
+            if (ok && String(nextName || '').trim() && String(nextName || '').trim() !== workerName) {
+                this.openStaffSettings(String(nextName || '').trim());
+            }
+        };
+
+        renameBtn.addEventListener('click', doRename);
+        renameInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                doRename();
+            }
+        });
+
+        const saveAlias = () => {
+            const alias = String(ppAliasInput.value || '').trim();
+            const settings = this.getStaffSettings(workerName);
+            settings.peoplePlannerAlias = alias;
+            localStorage.setItem(`staffSettings_${workerName}`, JSON.stringify(settings));
+            void this.refreshPeoplePlannerOverlay();
+            this.showToast('PeoplePlanner alias saved');
+        };
+
+        ppAliasSaveBtn.addEventListener('click', saveAlias);
+        ppAliasInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                saveAlias();
+            }
+        });
 
         // Add event listeners for auto-saving preferences
         setTimeout(() => {
@@ -1329,8 +2274,9 @@ class ShiftCalendar {
         }, 100);
 
         // Initialize and show modal
-        const modal = new bootstrap.Modal(document.getElementById('staffSettingsModal'));
-        modal.show();
+        if (!modalEl.classList.contains('show')) {
+            bsModal.show();
+        }
     }
 
     createShiftPreferenceRow(shift, staffSettings) {
@@ -1371,7 +2317,8 @@ class ShiftCalendar {
         const settings = localStorage.getItem(`staffSettings_${workerName}`);
         return settings ? JSON.parse(settings) : {
             dayPreferences: {},
-            holidays: []
+            holidays: [],
+            peoplePlannerAlias: ''
         };
     }
 

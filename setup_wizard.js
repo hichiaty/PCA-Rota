@@ -4,10 +4,12 @@ class SetupWizard {
         this.steps = [
             { id: 'welcome', title: 'Welcome to PCA Rota' },
             { id: 'user', title: 'Your Details' },
+            { id: 'peoplePlanner', title: 'PeoplePlanner (Optional)' },
             { id: 'shifts', title: 'Configure Shifts' },
             { id: 'staff', title: 'Add Staff' },
             { id: 'complete', title: 'Setup Complete' }
         ];
+
         this.currentStep = 0;
         this.shiftCount = 0; // Start with no shifts
         this.shifts = []; // Empty array instead of default shifts
@@ -102,7 +104,9 @@ class SetupWizard {
         nextBtn.className = 'btn btn-primary wizard-next-btn';
         nextBtn.textContent = 'Next';
         nextBtn.id = 'wizardNextBtn';
-        nextBtn.addEventListener('click', () => this.goToNextStep());
+        nextBtn.addEventListener('click', () => {
+            void this.goToNextStep();
+        });
 
         footer.appendChild(backBtn);
         footer.appendChild(nextBtn);
@@ -377,6 +381,9 @@ class SetupWizard {
             case 'user':
                 this.renderUserStep(body);
                 break;
+            case 'peoplePlanner':
+                this.renderPeoplePlannerStep(body);
+                break;
             case 'shifts':
                 this.renderShiftsStep(body);
                 break;
@@ -387,6 +394,108 @@ class SetupWizard {
                 this.renderCompleteStep(body);
                 break;
         }
+    }
+
+    renderPeoplePlannerStep(container) {
+        container.innerHTML = `
+            <div class="wizard-section">
+                <h3>PeoplePlanner (Optional)</h3>
+                <p class="text-muted">If you use PeoplePlanner, you can store your connection settings here. You can also configure this later from the main app.</p>
+
+                <div class="alert alert-light border">
+                    These settings will be stored in localStorage in an encrypted format.
+                </div>
+
+                <div class="row g-3">
+                    <div class="col-12">
+                        <label class="form-label" for="wizardPpBaseUrl">PeoplePlanner Base URL</label>
+                        <input type="url" class="form-control" id="wizardPpBaseUrl" placeholder="https://service....peopleplanner.biz">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label" for="wizardPpEmail">Email</label>
+                        <input type="email" class="form-control" id="wizardPpEmail" placeholder="you@example.com">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label" for="wizardPpPassword">Password</label>
+                        <input type="password" class="form-control" id="wizardPpPassword" placeholder="Password">
+                    </div>
+                    <div class="col-12">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" value="" id="wizardPpShowPassword">
+                            <label class="form-check-label" for="wizardPpShowPassword">Show password</label>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mt-4 d-flex flex-wrap gap-2 justify-content-between">
+                    <div class="d-flex flex-wrap gap-2">
+                        <button class="btn btn-outline-secondary" id="wizardPpSkipBtn" type="button">Skip</button>
+                        <button class="btn btn-outline-danger" id="wizardPpClearBtn" type="button">Clear</button>
+                    </div>
+                    <button class="btn btn-outline-secondary" id="wizardPpTestBtn" type="button">Test connection</button>
+                </div>
+            </div>
+        `;
+
+        const baseUrlEl = document.getElementById('wizardPpBaseUrl');
+        const emailEl = document.getElementById('wizardPpEmail');
+        const passwordEl = document.getElementById('wizardPpPassword');
+        const showPasswordEl = document.getElementById('wizardPpShowPassword');
+
+        showPasswordEl.addEventListener('change', () => {
+            passwordEl.type = showPasswordEl.checked ? 'text' : 'password';
+        });
+
+        if (window.PeoplePlanner) {
+            window.PeoplePlanner.loadSettings().then(existing => {
+                if (existing) {
+                    baseUrlEl.value = existing.baseUrl || '';
+                    emailEl.value = existing.email || '';
+                    passwordEl.value = existing.password || '';
+                }
+            }).catch(() => {
+            });
+        }
+
+        document.getElementById('wizardPpSkipBtn').addEventListener('click', () => {
+            void this.goToNextStep();
+        });
+
+        document.getElementById('wizardPpClearBtn').addEventListener('click', () => {
+            if (!window.PeoplePlanner) {
+                alert('PeoplePlanner module not loaded.');
+                return;
+            }
+            localStorage.removeItem(window.PeoplePlanner.SETTINGS_STORAGE_KEY);
+            localStorage.removeItem(window.PeoplePlanner.CRYPTO_KEY_STORAGE_KEY);
+            baseUrlEl.value = '';
+            emailEl.value = '';
+            passwordEl.value = '';
+        });
+
+        document.getElementById('wizardPpTestBtn').addEventListener('click', async () => {
+            if (!window.PeoplePlanner) {
+                alert('PeoplePlanner module not loaded.');
+                return;
+            }
+
+            const baseUrl = baseUrlEl.value.trim();
+            const email = emailEl.value.trim();
+            const password = passwordEl.value;
+
+            if (!baseUrl || !email || !password) {
+                alert('Please provide Base URL, Email, and Password to test.');
+                return;
+            }
+
+            try {
+                const client = new window.PeoplePlanner.PeoplePlannerClient(baseUrl);
+                await client.authenticate(email, password);
+                alert('PeoplePlanner connection OK');
+            } catch (e) {
+                alert('PeoplePlanner test failed. Check URL/credentials/CORS.');
+            }
+        });
     }
 
     renderWelcomeStep(container) {
@@ -688,6 +797,8 @@ class SetupWizard {
         const hasAssignments = data.assignments && typeof data.assignments === 'object';
         const hasUserName = data.userName && typeof data.userName === 'string';
         const hasStaffSettings = data.staffSettings && typeof data.staffSettings === 'object';
+        const hasPeoplePlanner = data.peoplePlanner && typeof data.peoplePlanner === 'object' &&
+            (data.peoplePlanner.settingsEnc || data.peoplePlanner.cryptoKey);
 
         // Create a temporary container to store our import results
         const importResults = {
@@ -695,7 +806,8 @@ class SetupWizard {
             shiftPatterns: hasShiftPatterns ? data.shiftPatterns : [],
             assignments: hasAssignments ? data.assignments : {},
             userName: hasUserName ? data.userName : this.userName || '',
-            staffSettings: hasStaffSettings ? data.staffSettings : {}
+            staffSettings: hasStaffSettings ? data.staffSettings : {},
+            peoplePlanner: hasPeoplePlanner ? data.peoplePlanner : null
         };
 
         // Show missing data form if necessary
@@ -733,6 +845,12 @@ class SetupWizard {
             foundItems.push(`Staff settings (${settingsCount} staff members)`);
         } else {
             missingItems.push('Staff settings');
+        }
+
+        if (importResults.peoplePlanner) {
+            foundItems.push('PeoplePlanner settings');
+        } else {
+            missingItems.push('PeoplePlanner settings');
         }
 
         importSection.innerHTML = `
@@ -840,6 +958,16 @@ class SetupWizard {
                         </div>
                     ` : ''}
                     
+                    ${!importResults.peoplePlanner ? `
+                        <div class="mb-4 fade-in">
+                            <label class="form-label">PeoplePlanner Settings</label>
+                            <div class="alert alert-light border">
+                                <i class="bi bi-lightbulb-fill text-warning me-2"></i>
+                                No PeoplePlanner settings found in the backup. You can configure them later.
+                            </div>
+                        </div>
+                    ` : ''}
+                    
                     <div class="d-flex justify-content-between mt-5">
                         <button class="btn btn-outline-secondary" id="backToImportBtn">
                             <i class="bi bi-arrow-left me-2"></i>Back
@@ -939,6 +1067,20 @@ class SetupWizard {
             });
         }
 
+        if (importResults.peoplePlanner && typeof importResults.peoplePlanner === 'object') {
+            if (importResults.peoplePlanner.settingsEnc) {
+                localStorage.setItem('peoplePlannerSettingsEnc', importResults.peoplePlanner.settingsEnc);
+            } else {
+                localStorage.removeItem('peoplePlannerSettingsEnc');
+            }
+
+            if (importResults.peoplePlanner.cryptoKey) {
+                localStorage.setItem('peoplePlannerCryptoKey', importResults.peoplePlanner.cryptoKey);
+            } else {
+                localStorage.removeItem('peoplePlannerCryptoKey');
+            }
+        }
+
         this.userName = importResults.userName;
         localStorage.setItem('userName', importResults.userName);
 
@@ -963,6 +1105,8 @@ class SetupWizard {
                         <li>Holiday/time-off schedules</li>
                     </ul>
                 </li>` : ''}
+                        ${importResults.peoplePlanner ?
+                `<li><i class="bi bi-check-circle-fill text-success me-2"></i>PeoplePlanner settings</li>` : ''}
                     </ul>
                 </div>
                 
@@ -1371,6 +1515,17 @@ class SetupWizard {
                         </div>
                     </div>
                     ` : ''}
+                    
+                    ${localStorage.getItem('peoplePlannerSettingsEnc') ? `
+                    <div class="card mb-3">
+                        <div class="card-header">
+                            <strong>PeoplePlanner Settings</strong>
+                        </div>
+                        <div class="card-body">
+                            <p class="mb-0">Imported PeoplePlanner settings</p>
+                        </div>
+                    </div>
+                    ` : ''}
                 </div>
                 
                 <p class="mt-4">Click 'Finish Setup' to start using your rota system.</p>
@@ -1418,9 +1573,10 @@ class SetupWizard {
         document.head.appendChild(styleEl);
     }
 
-    goToNextStep() {
+    async goToNextStep() {
         // Validate current step before proceeding
-        if (!this.validateCurrentStep()) {
+        const isValid = await this.validateCurrentStep();
+        if (!isValid) {
             return;
         }
 
@@ -1439,7 +1595,7 @@ class SetupWizard {
         }
     }
 
-    validateCurrentStep() {
+    async validateCurrentStep() {
         switch (this.steps[this.currentStep].id) {
             case 'user':
                 // Make user name compulsory
@@ -1448,6 +1604,33 @@ class SetupWizard {
                     document.getElementById('userNameInput').focus();
                     return false;
                 }
+                return true;
+
+            case 'peoplePlanner':
+                if (!window.PeoplePlanner) {
+                    return true;
+                }
+
+                const baseUrl = (document.getElementById('wizardPpBaseUrl')?.value || '').trim();
+                const email = (document.getElementById('wizardPpEmail')?.value || '').trim();
+                const password = document.getElementById('wizardPpPassword')?.value || '';
+
+                const anyProvided = Boolean(baseUrl || email || password);
+                if (anyProvided && (!baseUrl || !email || !password)) {
+                    alert('Please provide Base URL, Email, and Password (or clear all fields / press Skip).');
+                    return false;
+                }
+
+                if (anyProvided) {
+                    try {
+                        await window.PeoplePlanner.saveSettings({ baseUrl, email, password });
+                        return true;
+                    } catch (e) {
+                        alert('Failed to save PeoplePlanner settings.');
+                        return false;
+                    }
+                }
+
                 return true;
 
             case 'shifts':
